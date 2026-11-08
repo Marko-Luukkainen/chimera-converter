@@ -289,3 +289,43 @@ fn finnish_demo_song() {
     let wide = plan.gestures.iter().filter(|g| g.label.is_some_and(|l| l.as_str() == "aspiration")).filter_map(|g| g.targets.get(ControlKey::ABDUCTION)).fold(0.0f64, f64::max);
     assert!(wide < 0.25, "aspiration {wide}");
 }
+
+/// The Finnish vowel quality reaches the sound: LPC F1/F2 at the midpoint of a long vowel in a
+/// rendered word land near the Finnish table, and the back vowels sit well behind the English
+/// rendering of the same word (measured, male: /u/ F2 799 Hz fi vs 1043 en, /o/ 828 vs 947,
+/// /ɑ/ 1065 vs 1352; /e/ 1892, /ø/ 1531).
+#[test]
+fn finnish_vowels_reach_the_audio() {
+    use chimera::analysis::lpc::{FormantOpts, estimate_formants};
+    use chimera::anatomy::human::BODY_MALE;
+    use chimera::phonetics::planner::fi_vowel_table;
+    use chimera::voice::human_voice::{HumanVoice, SourcePatch};
+    const FS: f64 = 48000.0;
+    let f12 = |w: &str, v: &str, lang: Option<Language>| {
+        let mut segs = word(w);
+        segs.last_mut().unwrap().word_end = Some(true);
+        let plan = plan_utterance(&segs, &PlanOptions { body: "male".into(), t0: 0.05, f0: Some(110.0), language: lang, ..Default::default() });
+        let mut voice = HumanVoice::new(FS, BODY_MALE, 2);
+        voice.set_source(&SourcePatch::f0(110.0));
+        voice.schedule(&plan.gestures);
+        let mut out = vec![0f32; (FS * (plan.end + 0.3)) as usize];
+        for c in out.chunks_mut(128) {
+            voice.render(c);
+        }
+        let s = plan.segments.iter().find(|s| s.ipa == v).unwrap();
+        let (c, len) = (((s.t0 + s.t1) / 2.0 * FS) as usize, (0.025 * FS) as usize);
+        let fr: Vec<f64> = (0..len / 4).map(|k| (0..4).map(|j| out[c - len / 2 + 4 * k + j] as f64).sum::<f64>() / 4.0).collect();
+        let fm = estimate_formants(&fr, FS / 4.0, FormantOpts { order: Some(14), max_bw: Some(700.0), ..Default::default() });
+        (fm[0].freq, fm[1].freq)
+    };
+    for (w, v, back) in [("tuuli", "u", true), ("kooma", "o", true), ("maata", "ɑ", true), ("teema", "e", false), ("nööri", "ø", false)] {
+        let (f1, f2) = f12(w, v, Some(Language::Finnish));
+        let t = &fi_vowel_table()["male"][v].formants;
+        assert!((f1 / t[0] - 1.0).abs() < 0.15, "{w} /{v}/ F1 {f1:.0} vs table {}", t[0]);
+        assert!((f2 / t[1] - 1.0).abs() < 0.12, "{w} /{v}/ F2 {f2:.0} vs table {}", t[1]);
+        if back {
+            let (_, en2) = f12(w, v, None);
+            assert!(f2 < 0.92 * en2, "{w} /{v}/ F2 fi {f2:.0} not behind en {en2:.0}");
+        }
+    }
+}
