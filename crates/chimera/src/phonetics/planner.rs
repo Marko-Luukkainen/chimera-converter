@@ -5,9 +5,9 @@
 //! The planners allocate and run off the audio thread. [`oral_gestures_into`] (used by the beat
 //! sequencer) builds into a caller's `Vec` and allocates nothing once it has capacity.
 
-use super::durations::{SegInfo, klatt_durations};
+use super::durations::{SegInfo, finnish_durations, klatt_durations};
 use super::inventory::{Glottal, Manner, PhonemeDef, Voicing, phoneme};
-use super::{Intonation, Plan, PlannedSegment, Segment};
+use super::{Intonation, Language, Plan, PlannedSegment, Segment};
 use crate::anatomy::human::{ArticKey, ArticPatch, BodyMix, BodyName};
 use crate::control::score::{ControlKey, Gesture, Targets};
 use crate::math::{js_max, js_min, js_round};
@@ -138,6 +138,9 @@ pub struct PlanOptions {
     /// fit short notes. Speech and live notes leave it unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sung: Option<bool>,
+    /// the language's duration rules, aspiration and intonation ("en" when unset)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<Language>,
 }
 
 /// JS truthiness of an optional number (`if (s.f0)`: 0 and NaN are false).
@@ -181,14 +184,17 @@ struct Span {
 pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
     let rate = o.rate.unwrap_or(1.0);
     let body = o.body;
-    // durations by the Klatt rules, on whole segments (diphthongs before they are split)
-    let durs = klatt_durations(input, |s| {
+    let finnish = o.language == Some(Language::Finnish);
+    // durations by the language's rules (Klatt's for English), on whole segments (diphthongs
+    // before they are split)
+    let seg_info = |s: &Segment| {
         if is_vowel(&s.ipa, body) {
             return SegInfo { vowel: true, ..Default::default() };
         }
         let d = phoneme(&s.ipa, body);
         SegInfo { vowel: false, manner: d.map(|d| d.manner), voiced: Some(d.is_some_and(|d| d.voicing == Voicing::Voiced)), dur: d.map(|d| d.dur) }
-    });
+    };
+    let durs = if finnish { finnish_durations(input, seg_info) } else { klatt_durations(input, seg_info) };
     // expand diphthongs into two vowel targets sharing the duration
     let mut segs: Vec<Seg> = Vec::with_capacity(input.len() + 4);
     for (si, s) in input.iter().enumerate() {
@@ -308,8 +314,9 @@ pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
             gestures.push(Gesture::new(t0, t1, 0.012, 0.015, 8.0, one(ControlKey::CLOSURE, 1.0)).label("ʔ"));
         } else if def.voicing == Voicing::Voiceless {
             if def.manner == Manner::Stop || def.manner == Manner::Affricate {
-                // aspirated when syllable-initial before a vowel and not after /s/ (English-like)
-                let aspirated = next_vowel && !prev_seg.is_some_and(|p| p.ipa == "s");
+                // aspirated when syllable-initial before a vowel and not after /s/ (English-like);
+                // Finnish /p t k/ are unaspirated everywhere (short-lag VOT, ~10–20 ms)
+                let aspirated = !finnish && next_vowel && !prev_seg.is_some_and(|p| p.ipa == "s");
                 let vot = if aspirated { 0.05 / rate } else { 0.012 };
                 gestures.push(Gesture::new(t0 + 0.25 * dur, t1 + vot * 0.4, 0.035, if aspirated { 0.045 } else { 0.02 }, 6.0, one(ControlKey::ABDUCTION, if aspirated { 0.36 } else { 0.22 })).label("aspiration"));
             } else {
@@ -338,7 +345,14 @@ pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
     }
     // ---- intonation: pitch targets on vowels
     let f0 = o.f0.unwrap_or(110.0);
-    let accent = o.accent.unwrap_or(0.14);
+    // Finnish: each stressed word-initial syllable gets a modest rise-fall, with no outsized
+    // nuclear accent, and a question is marked by -ko/-kö or a question word rather than a rise
+    let accent = o.accent.unwrap_or(if finnish { 0.09 } else { 0.14 });
+    let nuclear_gain = if finnish { 1.3 } else { 1.8 };
+    let intonation = match o.intonation {
+        Some(Intonation::Question) if finnish => Some(Intonation::Statement),
+        x => x,
+    };
     let total = js_max(0.2, end - o.t0);
     // the nuclear accent: the phrase's last primary-stressed vowel, a bigger excursion that falls
     // (statements) into the final low; earlier accents are smaller (a "hat" pattern)
@@ -362,7 +376,7 @@ pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
             let decl = 1.0 - 0.1 * prog;
             let is_nuclear = i as isize == nuclear;
             let acc = if s.stress == Some(1) {
-                1.0 + (if is_nuclear { accent * 1.8 } else { accent })
+                1.0 + (if is_nuclear { accent * nuclear_gain } else { accent })
             } else if s.stress == Some(2) {
                 1.0 + accent * 0.5
             } else {
@@ -370,10 +384,10 @@ pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
             };
             target = f0 * decl * acc;
             let last = n == v_idx.len() - 1;
-            if last && o.intonation == Some(Intonation::Question) {
+            if last && intonation == Some(Intonation::Question) {
                 target = f0 * 1.35;
             }
-            if last && o.intonation.unwrap_or(Intonation::Statement) == Intonation::Statement {
+            if last && intonation.unwrap_or(Intonation::Statement) == Intonation::Statement {
                 if is_nuclear && t1 - t0 > 0.08 {
                     // accent peak early in the vowel, then the fall within it
                     gestures.push(Gesture::new(t0, t0 + 0.35 * (t1 - t0), 0.05, 0.05, 1.0, one(ControlKey::F0, target)).label("pitch"));

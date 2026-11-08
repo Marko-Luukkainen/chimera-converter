@@ -45,6 +45,20 @@ impl Segment {
     }
 }
 
+/// The language a plan is timed and intoned for. The articulation is language-independent (the
+/// segments carry the IPA); the language picks the duration rules, the stop aspiration and the
+/// intonation pattern.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Language {
+    /// Klatt's duration rules, aspirated voiceless stops, a final rise on questions
+    #[default]
+    #[serde(rename = "en")]
+    English,
+    /// quantity-based durations, unaspirated stops, small accents, no question rise
+    #[serde(rename = "fi")]
+    Finnish,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Intonation {

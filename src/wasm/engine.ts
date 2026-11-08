@@ -145,6 +145,8 @@ export interface PlanOptions {
   /** a sung phrase (planSong sets it): consonants given a pitch hold it, and pitch ramps shrink
    *  to fit short notes */
   sung?: boolean;
+  /** the language's duration rules, stop aspiration and intonation ("en" when unset) */
+  language?: "en" | "fi";
 }
 
 export function planUtterance(segments: Segment[], options: PlanOptions): Plan {

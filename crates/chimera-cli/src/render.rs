@@ -23,7 +23,7 @@ use chimera::phonetics::sing::{
 };
 use chimera::phonetics::songs::DEMO_SONGS;
 use chimera::phonetics::syllables::lyrics_to_syllables;
-use chimera::phonetics::{Intonation, Syllable};
+use chimera::phonetics::{Intonation, Language, Syllable};
 use chimera::voice::human_voice::{HumanVoice, SCOPE_POINTS, SourcePatch, VoiceTelemetry};
 use std::io::Read;
 use std::time::Instant;
@@ -129,7 +129,7 @@ pub fn text(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let text = arg(a, 1, "Hello world.");
     let body_name = arg(a, 2, "male");
     let g = g2p()?;
-    render_phrases(ctx, name, body_name, &g.to_phrases(text))
+    render_phrases(ctx, name, body_name, &g.to_phrases(text), Language::English)
 }
 
 /// Finnish text through the Finnish G2P and the phrase planner.
@@ -143,6 +143,7 @@ pub fn finnish(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         name,
         body_name,
         &chimera::phonetics::finnish::to_phrases(text),
+        Language::Finnish,
     )
 }
 
@@ -152,6 +153,7 @@ fn render_phrases(
     name: &str,
     body_name: &str,
     phrases: &[Phrase],
+    language: Language,
 ) -> Result<(), String> {
     let b = body(body_name)?;
     let f0 = match body_name {
@@ -198,6 +200,7 @@ fn render_phrases(
             body: body_name.into(),
             t0: 0.05,
             f0: Some(f0),
+            language: Some(language),
             ..Default::default()
         },
     );

@@ -1,5 +1,6 @@
 //! Finnish G2P: letters, quantity, diphthongs and syllables, stress, numbers, phrasing.
-use chimera::phonetics::Intonation;
+use chimera::control::score::ControlKey;
+use chimera::phonetics::{Intonation, Language, PlannedSegment};
 use chimera::phonetics::finnish::{number_words, to_phrases, word};
 use chimera::phonetics::planner::{PlanOptions, plan_utterance};
 
@@ -88,18 +89,81 @@ fn phrases_and_questions_do_not_rise() {
     assert_eq!(p[1].segments.last().unwrap().word_end, Some(true));
 }
 
-/// tuli / tuuli / tulli: the long segment is clearly longer than its short counterpart.
+/// A Finnish word planned on its own: the planned segments.
+fn plan_fi(w: &str, language: Option<Language>) -> Vec<PlannedSegment> {
+    let mut segs = word(w);
+    segs.last_mut().unwrap().word_end = Some(true);
+    plan_utterance(&segs, &PlanOptions { body: "male".into(), f0: Some(110.0), language, ..Default::default() }).segments
+}
+
+/// Duration (s) of the n-th planned segment with this IPA.
+fn dur_of(plan: &[PlannedSegment], ipa: &str, nth: usize) -> f64 {
+    let s = plan.iter().filter(|s| s.ipa == ipa).nth(nth).unwrap_or_else(|| panic!("no {ipa} #{nth}"));
+    s.t1 - s.t0
+}
+
+/// tuli / tuuli / tulli: the long segment is clearly longer than its short counterpart, with
+/// or without the Finnish duration rules.
 #[test]
 fn quantity_reaches_the_plan() {
-    let dur = |w: &str, ipa: &str| {
-        let mut segs = word(w);
+    for lang in [None, Some(Language::Finnish)] {
+        let (tuli, tuuli, tulli) = (plan_fi("tuli", lang), plan_fi("tuuli", lang), plan_fi("tulli", lang));
+        let vowel = dur_of(&tuuli, "u", 0) / dur_of(&tuli, "u", 0);
+        let cons = dur_of(&tulli, "l", 0) / dur_of(&tuli, "l", 0);
+        assert!(vowel > 1.7, "{lang:?} vowel ratio {vowel}");
+        assert!(cons > 1.7, "{lang:?} consonant ratio {cons}");
+    }
+}
+
+/// The Finnish quantity minimal pairs, measured in the plan: kato / katto / kaato and
+/// tuli / tuuli / tulli. Long vowels ~2.2× short in the first syllable, geminate stop closures
+/// ~2.3×, geminate sonorants ~1.9×; the second-syllable vowel is half-long only after a light
+/// first syllable (kato, tuli), not after a long vowel or a geminate.
+#[test]
+fn finnish_minimal_pairs() {
+    let fi = Some(Language::Finnish);
+    let (kato, katto, kaato) = (plan_fi("kato", fi), plan_fi("katto", fi), plan_fi("kaato", fi));
+    let r = |a: f64, b: f64| a / b;
+    let v1 = r(dur_of(&kaato, "ɑ", 0), dur_of(&kato, "ɑ", 0));
+    let c = r(dur_of(&katto, "t", 0), dur_of(&kato, "t", 0));
+    assert!((2.0..2.6).contains(&v1), "kaato/kato first vowel {v1}");
+    assert!((2.0..2.6).contains(&c), "katto/kato closure {c}");
+    // the half-long second vowel: kato's /o/ is longer than katto's and kaato's
+    let o_light = dur_of(&kato, "o", 0);
+    for (w, p) in [("katto", &katto), ("kaato", &kaato)] {
+        let ratio = o_light / dur_of(p, "o", 0);
+        assert!((1.3..1.6).contains(&ratio), "kato /o/ vs {w} /o/: {ratio}");
+    }
+    // the first vowel before a geminate is not lengthened (no English pre-voicing rules)
+    assert!((dur_of(&katto, "ɑ", 0) - dur_of(&kato, "ɑ", 0)).abs() < 1e-9);
+    let (tuli, tulli) = (plan_fi("tuli", fi), plan_fi("tulli", fi));
+    let l = dur_of(&tulli, "l", 0) / dur_of(&tuli, "l", 0);
+    assert!((1.7..2.1).contains(&l), "tulli/tuli /l/ {l}");
+}
+
+/// Finnish /p t k/ are unaspirated: the glottal opening at a stop release is the small
+/// short-lag one, not the wide English aspiration.
+#[test]
+fn finnish_stops_are_unaspirated() {
+    let abduction = |lang: Option<Language>| {
+        let mut segs = word("tapa");
         segs.last_mut().unwrap().word_end = Some(true);
-        let plan = plan_utterance(&segs, &PlanOptions::default());
-        let s = plan.segments.iter().find(|s| s.ipa == ipa).unwrap();
-        s.t1 - s.t0
+        let plan = plan_utterance(&segs, &PlanOptions { body: "male".into(), f0: Some(110.0), language: lang, ..Default::default() });
+        plan.gestures.iter().filter(|g| g.label.is_some_and(|l| l.as_str() == "aspiration")).map(|g| g.targets.get(ControlKey::ABDUCTION).unwrap()).fold(0.0f64, f64::max)
     };
-    let (u, uu) = (dur("tuli", "u"), dur("tuuli", "u"));
-    let (l, ll) = (dur("tuli", "l"), dur("tulli", "l"));
-    assert!(uu / u > 1.7, "vowel ratio {}", uu / u);
-    assert!(ll / l > 1.7, "consonant ratio {}", ll / l);
+    assert!(abduction(None) > 0.3, "English aspirates");
+    assert!(abduction(Some(Language::Finnish)) < 0.25, "Finnish does not aspirate");
+}
+
+/// A Finnish question does not end in a rise, even when the phrase is marked as one.
+#[test]
+fn finnish_question_keeps_the_fall() {
+    let last_pitch = |lang: Option<Language>| {
+        let mut segs = word("tuletko");
+        segs.last_mut().unwrap().word_end = Some(true);
+        let plan = plan_utterance(&segs, &PlanOptions { body: "male".into(), f0: Some(110.0), intonation: Some(Intonation::Question), language: lang, ..Default::default() });
+        plan.gestures.iter().rev().find(|g| g.label.is_some_and(|l| l.as_str() == "pitch")).map(|g| g.targets.get(ControlKey::F0).unwrap()).unwrap()
+    };
+    assert!(last_pitch(None) > 140.0, "English questions rise");
+    assert!(last_pitch(Some(Language::Finnish)) < 100.0, "Finnish questions fall");
 }

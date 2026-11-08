@@ -199,3 +199,141 @@ const LONG: f64 = 2.0;
 fn long_factor(s: &Segment) -> f64 {
     if s.long == Some(true) { LONG } else { 1.0 }
 }
+
+// ---------------------------------------------------------------- Finnish
+
+/// Short (singleton) durations of Finnish phonemes (ms), word-medial in a stressed syllable at a
+/// normal reading rate. Finnish keeps the short/long contrast in every syllable, so there is no
+/// separate minimum duration and no vowel reduction: a segment's context factors multiply this.
+/// Values follow the ranges reported for read Standard Finnish (Lehtonen 1970; Suomi, Toivanen &
+/// Ylitalo 2008, ch. 4): short vowels 60–90 ms (open vowels longest), stop closures 60–80 ms,
+/// /d/ and the approximants short (the /d/ is often a tap).
+fn fi_table(ipa: &str) -> Option<f64> {
+    Some(match ipa {
+        "ɑ" | "æ" => 85.0,
+        "e" | "o" | "ø" => 78.0,
+        "i" | "u" | "y" => 70.0,
+        "p" => 80.0,
+        "t" => 70.0,
+        "k" => 75.0,
+        "b" => 65.0,
+        "d" => 40.0,
+        "g" => 60.0,
+        "f" => 90.0,
+        "s" => 90.0,
+        "ʃ" => 95.0,
+        "h" => 65.0,
+        "ɦ" => 50.0,
+        "m" => 65.0,
+        "n" => 60.0,
+        "ŋ" => 65.0,
+        "l" => 60.0,
+        "r" => 55.0,
+        "ʋ" => 50.0,
+        "j" => 50.0,
+        _ => return None,
+    })
+}
+
+/// A long vowel in a stressed syllable is ~2.2× the short one; in unstressed syllables the ratio
+/// is a little smaller but the contrast stays (Lehtonen 1970: 2.0–2.5 in first syllables).
+pub const FI_LONG_VOWEL: f64 = 2.2;
+const FI_LONG_VOWEL_UNSTRESSED: f64 = 1.9;
+/// A geminate stop's closure is ~2.3× the singleton's; geminate sonorants and fricatives ~1.9×.
+pub const FI_GEMINATE_STOP: f64 = 2.3;
+const FI_GEMINATE_OTHER: f64 = 1.9;
+/// A diphthong takes about the time of a long vowel.
+const FI_DIPHTHONG: f64 = 2.0;
+/// The vowel of a second syllable after a light (CV) first syllable is half-long: "kala" has a
+/// longer final [ɑ] than "kalla" or "kaala" (Lehtonen 1970; Suomi et al. 2008).
+pub const FI_HALF_LONG: f64 = 1.45;
+
+/// Durations (s) for one phrase of Finnish segments (explicit `dur` values are kept). Quantity
+/// rules in place of Klatt's: long vowels and geminates from [`Segment::long`], a diphthong (a
+/// two-vowel segment, "ɑi") as long as a long vowel, the half-long vowel of a second syllable
+/// after a light first syllable, mild phrase-final lengthening, a slight shortening of unstressed
+/// syllables and of consonants in clusters. None of the English rules apply: no vowel reduction,
+/// no lengthening before voiced consonants, no aspiration compensation.
+pub fn finnish_durations(segs: &[Segment], info: impl Fn(&Segment) -> SegInfo) -> Vec<f64> {
+    let n = segs.len();
+    let inf: Vec<SegInfo> = segs.iter().map(info).collect();
+    let long = |i: usize| segs[i].long == Some(true);
+    let diphthong = |i: usize| inf[i].vowel && segs[i].ipa.chars().count() > 1;
+    // word index of each segment, and the syllable (nucleus) count of each vowel within its word
+    let mut word = vec![0usize; n];
+    let mut syl = vec![0usize; n];
+    let mut w = 0;
+    let mut k = 0;
+    for i in 0..n {
+        if i > 0 && segs[i - 1].word_end == Some(true) {
+            w += 1;
+            k = 0;
+        }
+        word[i] = w;
+        if inf[i].vowel {
+            syl[i] = k;
+            k += 1;
+        }
+    }
+    let last_vowel = (0..n).rev().find(|&i| inf[i].vowel);
+    // a second-syllable vowel after a light first syllable: the first nucleus is short (not long,
+    // not a diphthong) and at most one short consonant separates the two nuclei
+    let half_long = |i: usize| -> bool {
+        if syl[i] != 1 || long(i) || diphthong(i) {
+            return false;
+        }
+        let Some(v0) = (0..i).rev().find(|&j| inf[j].vowel) else { return false };
+        if word[v0] != word[i] || long(v0) || diphthong(v0) {
+            return false;
+        }
+        let between: Vec<usize> = (v0 + 1..i).collect();
+        between.len() <= 1 && between.iter().all(|&j| !long(j))
+    };
+
+    (0..n)
+        .map(|i| {
+            let s = &segs[i];
+            if let Some(d) = s.dur {
+                return d;
+            }
+            let first = s.ipa.chars().next().map(|c| c.to_string()).unwrap_or_default();
+            let fallback = 1000.0 * inf[i].dur.unwrap_or(0.08);
+            let mut d = if diphthong(i) {
+                fi_table(&first).unwrap_or(78.0) * FI_DIPHTHONG
+            } else {
+                fi_table(&s.ipa).unwrap_or(if inf[i].vowel { 78.0 } else { fallback })
+            };
+            if inf[i].vowel {
+                let stress = s.stress.unwrap_or(0);
+                if long(i) {
+                    d *= if stress == 1 { FI_LONG_VOWEL } else { FI_LONG_VOWEL_UNSTRESSED };
+                }
+                if half_long(i) {
+                    d *= FI_HALF_LONG;
+                }
+                d *= match stress {
+                    1 => 1.0,
+                    2 => 0.95,
+                    _ => 0.9,
+                };
+                if Some(i) == last_vowel {
+                    d *= 1.3; // phrase-final lengthening (milder than English)
+                }
+                return d / 1000.0;
+            }
+            // consonants
+            if long(i) {
+                d *= if inf[i].manner == Some(Manner::Stop) { FI_GEMINATE_STOP } else { FI_GEMINATE_OTHER };
+            }
+            let prev_c = i > 0 && !inf[i - 1].vowel && segs[i - 1].ipa != "_" && word[i - 1] == word[i];
+            let next_c = i + 1 < n && !inf[i + 1].vowel && segs[i + 1].ipa != "_" && word[i + 1] == word[i];
+            if prev_c || next_c {
+                d *= 0.85; // cluster
+            }
+            if last_vowel.is_some_and(|v| i > v) {
+                d *= 1.2; // phrase-final coda
+            }
+            d / 1000.0
+        })
+        .collect()
+}
