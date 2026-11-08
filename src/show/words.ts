@@ -5,12 +5,16 @@
 import type { Syllable } from "../wasm/types.ts";
 import type { MouthWord } from "../ui/mouthWords.ts";
 
-/** a melody file: `{"bpm", "t0"?, "lyrics", "notes": [[midi, beats], ...]}` (midi <= 0 is a rest) */
+/**
+ * a melody file: `{"bpm", "t0"?, "lyrics", "notes": [[midi, beats], ...], "lang"?}` (midi <= 0 is
+ * a rest; `"lang": "fi"` for Finnish lyrics, English when absent, as `chimera render notes` reads it)
+ */
 export interface Melody {
   bpm: number;
   t0?: number;
   lyrics: string;
   notes: [number, number][];
+  lang?: string;
 }
 
 export interface SungWords {

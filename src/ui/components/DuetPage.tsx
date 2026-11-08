@@ -11,8 +11,10 @@
  *     "voices": [{ "name": "Lower", "tele": "male.tele" }, { "name": "Upper", "tele": "female.tele" }] }
  *
  * Optional: `bpm` and `downbeat` (s, a bar's first beat) nod the heads on the beat; a voice's
- * `melody` (the melody file it was rendered from) writes its words at its mouth, and the show's
- * `spell` ({"owr": "our"}) writes a syllable spelled for the dictionary as it should read.
+ * `melody` (the melody file it was rendered from) writes its words at its mouth, split into
+ * syllables by its `"lang"` (Finnish rules for "fi", the English dictionary otherwise, as the CLI
+ * sang them), and the show's `spell` ({"owr": "our"}) writes a syllable spelled for the dictionary
+ * as it should read.
  */
 import { useEffect, useRef, useState } from "react";
 import { AnatomyView3D, type HeadFeed } from "./AnatomyView3D.tsx";
@@ -26,7 +28,7 @@ import type { ViewFlags } from "../render/anatomy.ts";
 import { mouthWords } from "../mouthWords.ts";
 import { V } from "../colors.ts";
 import { g2p } from "../speech.ts";
-import { lyricsToSyllables } from "../../wasm/engine.ts";
+import { lyricsToSyllables, finnishLyricsToSyllables } from "../../wasm/engine.ts";
 import { sungWords, wordAt, type Melody, type SungWords } from "../../show/words.ts";
 import type { OverlayFn } from "./AnatomyView.tsx";
 
@@ -77,13 +79,16 @@ export function DuetPage(props: { id: string }) {
       const show = (await (await fetchOk(base + "show.json")).json()) as ShowFile;
       if (!show.voices?.length || !show.audio) throw new Error("show.json needs audio and voices");
       const [audio, ...teles] = await Promise.all([fetchOk(base + show.audio).then((r) => r.arrayBuffer()), ...show.voices.map((v) => fetchOk(base + v.tele).then((r) => r.arrayBuffer()))]);
-      // the words: syllables as the CLI splits them (the pronouncing dictionary first, as it does)
+      // the words: syllables as the CLI splits them: Finnish lyrics by the Finnish rules (English
+      // ones split "käyn" at the ä and their count missed the notes, so a Finnish voice showed
+      // nothing), English by the pronouncing dictionary first, as it does
       const melodies = await Promise.all(show.voices.map((v) => (v.melody ? fetchOk(base + v.melody).then((r) => r.json() as Promise<Melody>) : null)));
-      if (melodies.some(Boolean)) await g2p.load().catch(() => {});
+      const finnish = (m: Melody) => m.lang === "fi";
+      if (melodies.some((m) => m && !finnish(m))) await g2p.load().catch(() => {});
       const words = melodies.map((m) => {
         if (!m) return null;
         try {
-          return sungWords(m, lyricsToSyllables(m.lyrics), show.spell);
+          return sungWords(m, finnish(m) ? finnishLyricsToSyllables(m.lyrics) : lyricsToSyllables(m.lyrics), show.spell);
         } catch (e) {
           console.warn("duet: no words for a voice:", e);
           return null;

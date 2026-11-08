@@ -117,6 +117,29 @@ export interface LabelOpts {
   moving?: boolean;
 }
 
+// ------------------------------------------------------------------ Nordic letters
+// The Hershey font has no Ä Ö Å (nor ä ö å): the browser drew them from the fallback font, a filled
+// face among the stroked letters, so a Finnish word looked patched. The base letter comes from the
+// font and the dots or the ring are drawn as strokes in its weight.
+
+/** the diacritic each letter adds to its base */
+const NORDIC: Record<string, { base: string; mark: "dots" | "ring" }> = {
+  Ä: { base: "A", mark: "dots" },
+  Ö: { base: "O", mark: "dots" },
+  Å: { base: "A", mark: "ring" },
+  ä: { base: "a", mark: "dots" },
+  ö: { base: "o", mark: "dots" },
+  å: { base: "a", mark: "ring" },
+  Ü: { base: "U", mark: "dots" },
+  ü: { base: "u", mark: "dots" },
+};
+const NORDIC_RE = /[ÄÖÅäöåÜü]/;
+
+/** `text` with each letter the Hershey font lacks (Ä Ö Å Ü) replaced by its base letter */
+export function hersheyBase(text: string): string {
+  return NORDIC_RE.test(text) ? Array.from(text, (ch) => NORDIC[ch]?.base ?? ch).join("") : text;
+}
+
 /** Hershey text (pass capitals for chrome-style labels) */
 export function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, o: LabelOpts = {}): void {
   const size = o.size ?? 11;
@@ -124,15 +147,58 @@ export function label(ctx: CanvasRenderingContext2D, text: string, x: number, y:
   ctx.globalCompositeOperation = "lighter";
   ctx.globalAlpha = o.alpha ?? 1;
   ctx.font = hfont(size, o.weight);
-  if (hasLetterSpacing) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${((o.ls ?? 0.14) * size).toFixed(2)}px`;
+  const ls = (o.ls ?? 0.14) * size;
+  if (hasLetterSpacing) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${ls.toFixed(2)}px`;
   ctx.textAlign = o.align ?? "left";
   ctx.textBaseline = o.baseline ?? "alphabetic";
   ctx.fillStyle = o.color ?? V.blue;
   const c = ctx as CanvasRenderingContext2D & { layoutMoving?: boolean };
   if (o.moving) c.layoutMoving = true;
-  ctx.fillText(text, x, y);
+  const base = hersheyBase(text);
+  ctx.fillText(base, x, y);
+  if (base !== text) nordicMarks(ctx, text, base, x, y, size, o.weight, hasLetterSpacing ? ls : 0, o.color ?? V.blue);
   c.layoutMoving = undefined;
   ctx.restore();
+}
+
+/** The dots and rings over the letters of `text` that `label` drew as their bases (`base`). */
+function nordicMarks(ctx: CanvasRenderingContext2D, text: string, base: string, x: number, y: number, size: number, weight: "l" | "m" | undefined, ls: number, color: string): void {
+  const chars = Array.from(text);
+  const baseChars = Array.from(base);
+  const width = ctx.measureText(base).width;
+  const align = ctx.textAlign;
+  const x0 = align === "right" || align === "end" ? x - width : align === "center" ? x - width / 2 : x;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(0.8, size * (weight === "m" ? 0.075 : 0.055));
+  ctx.lineCap = "round";
+  let prefix = "";
+  chars.forEach((ch, i) => {
+    const b = baseChars[i];
+    const nm = NORDIC[ch];
+    if (nm) {
+      const m = ctx.measureText(b);
+      const cx = x0 + ctx.measureText(prefix).width + (m.width - ls) / 2;
+      const top = y - m.actualBoundingBoxAscent;
+      const gap = size * 0.14;
+      if (nm.mark === "dots") {
+        // dots a little wider apart than the letter's stems are thick, the size of the font's own
+        // i dot (a stroke-wide round dot)
+        const dx = Math.max(size * 0.12, (m.width - ls) * 0.24);
+        const r = Math.max(0.3, size * 0.012);
+        for (const sx of [-1, 1]) {
+          ctx.beginPath();
+          ctx.arc(cx + sx * dx, top - gap, r, 0, 2 * Math.PI);
+          ctx.stroke();
+        }
+      } else {
+        const r = size * 0.09;
+        ctx.beginPath();
+        ctx.arc(cx, top - gap - r * 0.6, r, 0, 2 * Math.PI);
+        ctx.stroke();
+      }
+    }
+    prefix += b;
+  });
 }
 
 /** Width of a label as label() would draw it (same font and letter spacing). */
@@ -141,7 +207,7 @@ export function labelWidth(ctx: CanvasRenderingContext2D, text: string, o: Label
   ctx.save();
   ctx.font = hfont(size, o.weight);
   if (hasLetterSpacing) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${((o.ls ?? 0.14) * size).toFixed(2)}px`;
-  const wd = ctx.measureText(text).width;
+  const wd = ctx.measureText(hersheyBase(text)).width;
   ctx.restore();
   return wd;
 }

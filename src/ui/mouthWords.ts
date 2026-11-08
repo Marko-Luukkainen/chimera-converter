@@ -3,7 +3,7 @@
  * the lips as it sounds. When the next one starts, it shrinks, dims and flies up and away, so a
  * fast scat run leaves a short trail instead of a pile-up.
  */
-import { hfont, label, seg } from "./render/vector.ts";
+import { hersheyBase, hfont, label, seg } from "./render/vector.ts";
 import type { OverlayFn } from "./components/AnatomyView.tsx";
 
 /** What is being said now. `key` changes with each new syllable or word (equal text may repeat). */
@@ -64,7 +64,7 @@ export function mouthWords(now: () => MouthWord | null, color: string, side: 1 |
       const u = Math.min(1, age / FADE);
       const text = wd.text.toUpperCase();
       ctx.font = hfont(base, "m");
-      const wide = ctx.measureText(text).width * 1.08;
+      const wide = ctx.measureText(hersheyBase(text)).width * 1.08;
       const size = (wide > room ? (base * room) / wide : base) * (1 - 0.55 * u);
       const alpha = left === null ? 1 : 0.75 * (1 - u) ** 1.5;
       const o = { size, color, weight: "m" as const, ls: 0.05, alpha, moving: left !== null };
