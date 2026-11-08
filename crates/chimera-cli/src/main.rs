@@ -28,7 +28,7 @@ usage: chimera <command> [args] [--float]
   diagnose       [outdir]
   compare csd    [csd-dir] [outdir] [--songs a|b|all|en001a,…] [--body female] [--jobs n]
                  [--against earlier/score.json]  (score.json: distance to the singer, and the verdict)
-  calibrate vowels     [male|female|child|all] [--out file]
+  calibrate vowels     [male|female|child|all] [--fi] [--out file]
   calibrate consonants [--out file]
 
 Output names are stems (<out>.wav). --float writes 32-bit float WAVs instead of 16-bit PCM.

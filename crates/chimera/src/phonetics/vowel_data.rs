@@ -64,3 +64,20 @@ pub static VOWELS: &[VowelRef] = &[
     vref("ɯ", "close back unrounded", [340.0, 1350.0, 2400.0], None, None, false, 0.0, 1.0),
     vref("ɤ", "close-mid back unrounded", [460.0, 1250.0, 2450.0], None, None, false, 0.35, 1.0),
 ];
+
+/// Finnish vowels whose quality differs from the reference above, calibrated into their own
+/// table (`vowelTargets.fi.generated.json`, `chimera calibrate vowels --fi`) so the English
+/// vowels don't move. Finnish /ɑ/ and /u/ are fully back (the American ones above are central and
+/// fronted): men's values rounded from one Finnish speaker's MRI-session recordings (Aalto et al.
+/// 2012, arXiv:1208.5963: [ɑ] 651/1024, [u] 306/675 Hz). Finnish /e/ is lower-mid with a lower F2
+/// than American "hayed" (Gordon 1999, Linguistica Uralica 35: male /e/ F2 1795–1929 Hz). /o/ and
+/// /ø/ are mid vowels placed between the neighbouring references (estimates, not measurements).
+/// Finnish /i y æ/ use the table above. Women's and children's values are scaled as above.
+#[rustfmt::skip]
+pub static FI_VOWELS: &[VowelRef] = &[
+    vref("e", "Fi. vesi", [470.0, 1880.0, 2550.0], None, None, false, 0.35, 0.05),
+    vref("ø", "Fi. pöytä", [440.0, 1500.0, 2250.0], None, None, true, 0.35, 0.1),
+    vref("ɑ", "Fi. kala", [650.0, 1030.0, 2600.0], None, None, false, 1.0, 1.0),
+    vref("o", "Fi. talo", [460.0, 800.0, 2400.0], None, None, true, 0.4, 1.0),
+    vref("u", "Fi. tuli", [310.0, 690.0, 2200.0], None, None, true, 0.0, 1.0),
+];

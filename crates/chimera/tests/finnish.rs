@@ -185,3 +185,61 @@ fn finnish_question_keeps_the_fall() {
     assert!(last_pitch(None) > 140.0, "English questions rise");
     assert!(last_pitch(Some(Language::Finnish)) < 100.0, "Finnish questions fall");
 }
+
+/// A Finnish plan takes /u/ from the Finnish vowel table (back, F2 well below the American /u/);
+/// English plans and Finnish vowels without their own entry (/i/) keep the main table.
+#[test]
+fn finnish_vowels_come_from_the_finnish_table() {
+    use chimera::anatomy::human::ArticKey;
+    use chimera::phonetics::planner::{fi_vowel_table, vowel_table};
+    let tb_x = |w: &str, ipa: &str, lang: Option<Language>| {
+        let mut segs = word(w);
+        segs.last_mut().unwrap().word_end = Some(true);
+        let plan = plan_utterance(&segs, &PlanOptions { body: "male".into(), f0: Some(110.0), language: lang, ..Default::default() });
+        plan.gestures.iter().find(|g| g.label.is_some_and(|l| l.as_str() == ipa)).and_then(|g| g.targets.get(ArticKey::TbX)).unwrap()
+    };
+    let fi_u = fi_vowel_table()["male"]["u"].artic.get(ArticKey::TbX).unwrap();
+    let en_u = vowel_table()["male"]["u"].artic.get(ArticKey::TbX).unwrap();
+    assert_eq!(tb_x("tuli", "u", Some(Language::Finnish)), fi_u);
+    assert_eq!(tb_x("tuli", "u", None), en_u);
+    assert_eq!(tb_x("tuli", "i", Some(Language::Finnish)), vowel_table()["male"]["i"].artic.get(ArticKey::TbX).unwrap());
+    // the Finnish back vowels are calibrated well behind the American ones
+    for v in ["u", "o", "ɑ"] {
+        let (fi, en) = (fi_vowel_table()["male"][v].formants[1], vowel_table()["male"][v].formants[1]);
+        assert!(fi < 0.9 * en, "/{v}/ F2 fi {fi} en {en}");
+    }
+}
+
+/// Finnish /t/ is dental: its tip target is the dental template, and the closure still seals
+/// (the template had never been used; mid-closure level measured at -44 dB re the vowel for the
+/// male voice, -52 dB for the female, against -39 / -47 dB for the alveolar English /t/).
+#[test]
+fn finnish_t_is_dental_and_seals() {
+    use chimera::anatomy::human::{ArticKey, BODY_FEMALE, BODY_MALE};
+    use chimera::voice::human_voice::{HumanVoice, SourcePatch};
+    for (body, name, f0) in [(BODY_MALE, "male", 110.0), (BODY_FEMALE, "female", 200.0)] {
+        for w in ["ata", "atta"] {
+            let mut segs = word(w);
+            segs.last_mut().unwrap().word_end = Some(true);
+            let plan = plan_utterance(&segs, &PlanOptions { body: name.into(), t0: 0.05, f0: Some(f0), language: Some(Language::Finnish), ..Default::default() });
+            let tip = plan.gestures.iter().find(|g| g.label.is_some_and(|l| l.as_str() == "t") && g.targets.get(ArticKey::TtX).is_some()).unwrap();
+            assert_eq!(tip.targets.get(ArticKey::TtX), Some(6.85), "{w}: dental tip");
+            let mut v = HumanVoice::new(48000.0, body, 2);
+            v.set_source(&SourcePatch::f0(f0));
+            v.schedule(&plan.gestures);
+            let mut out = vec![0f32; (48000.0 * (plan.end + 0.3)) as usize];
+            for c in out.chunks_mut(128) {
+                v.render(c);
+            }
+            let rms = |a: f64, b: f64| {
+                let (a, b) = ((a * 48000.0) as usize, (b * 48000.0) as usize);
+                (out[a..b].iter().map(|x| (*x as f64).powi(2)).sum::<f64>() / (b - a) as f64).sqrt()
+            };
+            let t = plan.segments.iter().find(|s| s.ipa == "t").unwrap();
+            let v0 = plan.segments.iter().find(|s| s.kind == "vowel").unwrap();
+            let (mid, h) = ((t.t0 + t.t1) / 2.0, (t.t1 - t.t0) * 0.2);
+            let db = 20.0 * (rms(mid - h, mid + h) / rms(v0.t0 + 0.01, v0.t1 - 0.01)).log10();
+            assert!(db < -35.0, "{name} {w}: mid-closure only {db:.1} dB below the vowel");
+        }
+    }
+}

@@ -11,11 +11,12 @@ use chimera::anatomy::human::{
 use chimera::math::{js_max, js_min, js_round, ln, pow};
 use chimera::phonetics::inventory::consonants as inventory;
 use chimera::phonetics::planner::VowelTable;
-use chimera::phonetics::vowel_data::VOWELS;
+use chimera::phonetics::vowel_data::{FI_VOWELS, VOWELS};
 use chimera::util::optimize::{NelderMeadOpts, nelder_mead};
 use chimera::voice::human_airway::HumanAirway;
 
 const VOWEL_TABLE: &str = "crates/chimera/src/phonetics/vowelTargets.generated.json";
+const FI_VOWEL_TABLE: &str = "crates/chimera/src/phonetics/vowelTargets.fi.generated.json";
 const CONSONANT_TABLE: &str = "crates/chimera/src/phonetics/consonantTargets.generated.json";
 const BODIES: [(&str, HumanBody); 3] = [
     ("male", BODY_MALE),
@@ -86,9 +87,13 @@ fn formants(air: &mut HumanAirway, freqs: &[f64], a: &HumanArtic) -> (Vec<f64>, 
 }
 
 /// Articulatory vowel targets fitted to reference formants with the frequency-domain airway
-/// model. `calibrate vowels [male|female|child|all] [--out file]`
+/// model. `calibrate vowels [male|female|child|all] [--fi] [--out file]`; `--fi` fits the Finnish
+/// vowel references into the Finnish table and leaves the main table alone.
 pub fn vowels(a: &[String]) -> Result<(), String> {
-    let (rest, out) = out_option(a, VOWEL_TABLE)?;
+    let fi = a.iter().any(|x| x == "--fi");
+    let a: Vec<String> = a.iter().filter(|x| *x != "--fi").cloned().collect();
+    let (rest, out) = out_option(&a, if fi { FI_VOWEL_TABLE } else { VOWEL_TABLE })?;
+    let refs = if fi { FI_VOWELS } else { VOWELS };
     let which = rest.first().map(String::as_str).unwrap_or("all");
     let n = 700;
     let freqs: Vec<f64> = (0..n)
@@ -106,7 +111,7 @@ pub fn vowels(a: &[String]) -> Result<(), String> {
         let mut air = HumanAirway::new(96000.0, body);
         let k = body.scale;
         let mut table: Vec<(String, Json)> = Vec::new();
-        for vw in VOWELS {
+        for vw in refs {
             let t = match bname {
                 "male" => vw.male,
                 "female" => vw.female,
@@ -149,6 +154,12 @@ pub fn vowels(a: &[String]) -> Result<(), String> {
                     c += 0.4 * pow((min_ok - min_area) / min_ok, 2.0);
                 }
                 c += 0.004 * pow(p[2] - jaw_prior, 2.0);
+                // Finnish: a close vowel keeps a close jaw. With the lips already at full
+                // protrusion, the fit lowered /u/'s F2 by opening the jaw behind the lip
+                // constriction (jaw 1.8 for [u]), a posture no speaker uses
+                if fi && vw.height < 0.2 {
+                    c += 0.3 * pow(js_max(0.0, p[2] - (jaw_prior + 0.35)), 2.0);
+                }
                 let open = vw.height > 0.6;
                 if vw.round {
                     let (w_max, p_min, ap_max) = (

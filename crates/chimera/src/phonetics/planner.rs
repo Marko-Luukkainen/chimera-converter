@@ -6,7 +6,7 @@
 //! sequencer) builds into a caller's `Vec` and allocates nothing once it has capacity.
 
 use super::durations::{SegInfo, finnish_durations, klatt_durations};
-use super::inventory::{Glottal, Manner, PhonemeDef, Voicing, phoneme};
+use super::inventory::{Glottal, Manner, PhonemeDef, Voicing, dental_stop, phoneme};
 use super::{Intonation, Language, Plan, PlannedSegment, Segment};
 use crate::anatomy::human::{ArticKey, ArticPatch, BodyMix, BodyName};
 use crate::control::score::{ControlKey, Gesture, Targets};
@@ -38,6 +38,13 @@ pub type VowelTable = BTreeMap<String, BTreeMap<String, VowelTarget>>;
 pub fn vowel_table() -> &'static VowelTable {
     static T: OnceLock<VowelTable> = OnceLock::new();
     T.get_or_init(|| serde_json::from_str(include_str!("vowelTargets.generated.json")).expect("vowelTargets.generated.json"))
+}
+
+/// The Finnish vowels calibrated to Finnish references (`vowel_data::FI_VOWELS`; parsed once).
+/// A Finnish plan takes a vowel from here first and from [`vowel_table`] otherwise.
+pub fn fi_vowel_table() -> &'static VowelTable {
+    static T: OnceLock<VowelTable> = OnceLock::new();
+    T.get_or_init(|| serde_json::from_str(include_str!("vowelTargets.fi.generated.json")).expect("vowelTargets.fi.generated.json"))
 }
 
 /// Diphthongs and r-coloured vowels expand to vowel sequences. American /eɪ oʊ/ glide toward
@@ -99,21 +106,35 @@ pub fn is_vowel(ipa: &str, body: BodyMix) -> bool {
 /// The calibrated articulation of a vowel for a body: between presets, the presets' calibrated
 /// articulations blended by the body's weights.
 pub fn vowel_artic(ipa: &str, body: BodyMix) -> Option<ArticPatch> {
+    table_vowel_artic(vowel_table(), ipa, body)
+}
+
+/// [`vowel_artic`] for a language: a Finnish vowel calibrated to Finnish references when the
+/// Finnish table has it.
+pub fn vowel_artic_in(ipa: &str, body: BodyMix, language: Language) -> Option<ArticPatch> {
+    if language == Language::Finnish
+        && let Some(v) = table_vowel_artic(fi_vowel_table(), ipa, body)
+    {
+        return Some(v);
+    }
+    vowel_artic(ipa, body)
+}
+
+fn table_vowel_artic(t: &VowelTable, ipa: &str, body: BodyMix) -> Option<ArticPatch> {
     if let Some(b) = body.preset() {
-        return preset_vowel_artic(ipa, b);
+        return preset_vowel_artic(t, ipa, b);
     }
     let w = body.weights();
     let mut parts = [(0.0, ArticPatch::default()); 3];
     for (i, (b, wi)) in w.iter().enumerate() {
         if *wi > 0.0 {
-            parts[i] = (*wi, preset_vowel_artic(ipa, *b)?);
+            parts[i] = (*wi, preset_vowel_artic(t, ipa, *b)?);
         }
     }
     Some(ArticPatch::blend(&parts))
 }
 
-fn preset_vowel_artic(ipa: &str, body: BodyName) -> Option<ArticPatch> {
-    let t = vowel_table();
+fn preset_vowel_artic(t: &VowelTable, ipa: &str, body: BodyName) -> Option<ArticPatch> {
     let v = t.get(body.as_str()).and_then(|b| b.get(ipa)).or_else(|| t.get("male").and_then(|m| m.get(ipa)))?;
     let mut out = ArticPatch::default();
     for k in VOWEL_KEYS {
@@ -137,6 +158,7 @@ fn preset_vowel_artic(ipa: &str, body: BodyName) -> Option<ArticPatch> {
 /// Parse the vowel and consonant tables now (so nothing initialises lazily on the audio thread).
 pub fn init() {
     vowel_table();
+    fi_vowel_table();
     super::inventory::init();
 }
 
@@ -235,12 +257,17 @@ pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
             segs.push(Seg { ipa: &s.ipa, dur: Some(durs[si]), stress: s.stress, f0: s.f0, def: None, vowel: None, glide_from: false });
         }
     }
+    let language = o.language.unwrap_or_default();
     for s in segs.iter_mut() {
-        let v = vowel_artic(s.ipa, body);
+        let v = vowel_artic_in(s.ipa, body, language);
         if v.is_some() {
             s.vowel = v;
         } else {
             s.def = phoneme(s.ipa, body);
+            // Finnish /t/ is dental
+            if finnish && s.ipa == "t" {
+                s.def = s.def.map(dental_stop);
+            }
         }
     }
     let mut gestures: Vec<Gesture> = Vec::new();

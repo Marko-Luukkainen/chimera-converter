@@ -135,7 +135,6 @@ impl PhonemeDef {
 // place templates
 const BILABIAL: Tg = &[(LipAp, -0.25)];
 const ALV_STOP: Tg = &[(TtX, 6.25), (TtY, 9.68)];
-#[allow(dead_code)]
 const DENT_STOP: Tg = &[(TtX, 6.85), (TtY, 9.0)];
 const POSTALV_STOP: Tg = &[(TtX, 5.75), (TtY, 10.0)];
 const RETRO_STOP: Tg = &[(TtX, 5.45), (TtY, 10.05), (TtCurl, 0.95)];
@@ -260,6 +259,16 @@ pub fn phoneme(ipa: &str, body: BodyMix) -> Option<PhonemeDef> {
         None => ArticPatch::blend(&body.weights().map(|(b, w)| (w, of(b)))),
     };
     Some(out)
+}
+
+/// A stop moved to the dental place (the tip against the upper teeth): Finnish /t/ is
+/// laminal-dental, not alveolar like English /t/. Only the tip targets change.
+pub fn dental_stop(mut def: PhonemeDef) -> PhonemeDef {
+    for (k, x) in DENT_STOP {
+        def.targets.set(*k, *x);
+    }
+    def.place = "dental";
+    def
 }
 
 pub fn consonants() -> &'static [PhonemeDef] {
