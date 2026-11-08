@@ -8,7 +8,7 @@ use chimera::phonetics::{Segment, Syllable};
 fn a_released_note_never_rises_again() {
     // /strɑ/ held, released 30 ms in: the vowel and its pitch have not begun yet
     let syl = Syllable { text: "stra".into(), onset: vec![Segment::new("s"), Segment::new("t"), Segment::new("ɹ")], nucleus: Segment { stress: Some(1), ..Segment::new("ɑ") }, coda: vec![], melisma: None, word_end: true, phrase_end: false };
-    let gs = plan_note_on(&syl, 57.0, &NoteOnOptions { body: "male".into(), vibrato: 30.0, tag: 4.0, legato_from: None });
+    let gs = plan_note_on(&syl, 57.0, &NoteOnOptions { body: "male".into(), vibrato: 30.0, tag: 4.0, legato_from: None, language: None });
     let mut score = GestureScore::new();
     for g in &gs {
         let mut g = *g;

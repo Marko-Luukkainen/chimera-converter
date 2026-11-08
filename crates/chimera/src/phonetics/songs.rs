@@ -1,5 +1,6 @@
 //! Demo melodies for Sing mode: [MIDI note, beats] per syllable, in the adult female register.
 
+use super::Language;
 use serde::Serialize;
 
 /// octave shift per body
@@ -20,6 +21,9 @@ pub struct DemoSong {
     pub notes: &'static [[f64; 2]],
     /// octave shift per body
     pub octave: SongOctave,
+    /// the lyrics' language (English when unset)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<Language>,
 }
 
 #[rustfmt::skip]
@@ -36,6 +40,7 @@ pub static DEMO_SONGS: &[DemoSong] = &[
             [64.0, 0.5], [62.0, 0.5], [60.0, 0.5], [59.0, 0.5], [57.0, 2.0],
         ],
         octave: SongOctave { male: -1.0, female: 0.0, child: 0.0 },
+        language: None,
     },
     DemoSong {
         // traditional (public domain)
@@ -47,5 +52,24 @@ pub static DEMO_SONGS: &[DemoSong] = &[
             [65.0, 1.0], [65.0, 1.0], [64.0, 1.0], [64.0, 1.0], [62.0, 1.0], [62.0, 1.0], [60.0, 2.0],
         ],
         octave: SongOctave { male: -1.0, female: 0.0, child: 0.0 },
+        language: None,
+    },
+    DemoSong {
+        // traditional (public domain): the Finnish words of "Frère Jacques"
+        name: "Jaakko kulta",
+        bpm: 104.0,
+        lyrics: "Jaakko kulta, Jaakko kulta, herää jo, herää jo! Kellojasi soita, kellojasi soita: pim pom pum, pim pom pum.",
+        notes: &[
+            [65.0, 1.0], [67.0, 1.0], [69.0, 1.0], [65.0, 1.0],
+            [65.0, 1.0], [67.0, 1.0], [69.0, 1.0], [65.0, 1.0],
+            [69.0, 1.0], [70.0, 1.0], [72.0, 2.0],
+            [69.0, 1.0], [70.0, 1.0], [72.0, 2.0],
+            [72.0, 0.5], [74.0, 0.5], [72.0, 0.5], [70.0, 0.5], [69.0, 1.0], [65.0, 1.0],
+            [72.0, 0.5], [74.0, 0.5], [72.0, 0.5], [70.0, 0.5], [69.0, 1.0], [65.0, 1.0],
+            [65.0, 1.0], [60.0, 1.0], [65.0, 2.0],
+            [65.0, 1.0], [60.0, 1.0], [65.0, 2.0],
+        ],
+        octave: SongOctave { male: -1.0, female: 0.0, child: 0.0 },
+        language: Some(Language::Finnish),
     },
 ];

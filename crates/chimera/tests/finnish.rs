@@ -243,3 +243,49 @@ fn finnish_t_is_dental_and_seals() {
         }
     }
 }
+
+/// Sung syllables: a consonant before a vowel starts the syllable, a geminate splits across the
+/// boundary, the written word splits the same way for display.
+#[test]
+fn finnish_lyrics_syllables() {
+    use chimera::phonetics::finnish::{hyphenate, lyrics_to_syllables};
+    let show = |text: &str| {
+        lyrics_to_syllables(text)
+            .iter()
+            .map(|s| {
+                let p = |v: &[chimera::phonetics::Segment]| v.iter().map(|c| c.ipa.as_str()).collect::<String>();
+                format!("{}:{}{}{}", s.text, p(&s.onset), s.nucleus.ipa, p(&s.coda))
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    assert_eq!(show("kissa"), "kis:kis sa:sɑ");
+    assert_eq!(show("kengät"), "ken:keŋ gät:ŋæt");
+    assert_eq!(show("maailma"), "maa:mɑ il:il ma:mɑ");
+    assert_eq!(show("radio"), "ra:rɑ di:di o:o");
+    assert_eq!(show("stressi"), "stres:stres si:si");
+    assert_eq!(show("Pöytä"), "Pöy:pøy tä:tæ");
+    assert_eq!(show("kart-ta"), "kart:kɑrt ta:tɑ");
+    assert_eq!(hyphenate("kirjoittaminen", 5), ["kir", "joit", "ta", "mi", "nen"]);
+    assert_eq!(hyphenate("taxi", 2), ["ta", "xi"]);
+    // a melisma mark holds the vowel; punctuation ends a phrase
+    let s = lyrics_to_syllables("Laulan - aina, joo.");
+    assert_eq!(s.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(), ["Lau", "lan", "~", "ai", "na", "joo"]);
+    assert_eq!(s.iter().map(|s| s.phrase_end).collect::<Vec<_>>(), [false, false, false, false, true, true]);
+}
+
+/// The Finnish demo song has one syllable per note, and plans with Finnish rules.
+#[test]
+fn finnish_demo_song() {
+    use chimera::phonetics::finnish::lyrics_to_syllables;
+    use chimera::phonetics::sing::{SongOptions, SungNote, plan_song};
+    use chimera::phonetics::songs::DEMO_SONGS;
+    let song = DEMO_SONGS.iter().find(|s| s.language == Some(Language::Finnish)).expect("a Finnish demo song");
+    let syl = lyrics_to_syllables(song.lyrics);
+    assert_eq!(syl.len(), song.notes.len(), "{}: {:?}", song.name, syl.iter().map(|s| &s.text).collect::<Vec<_>>());
+    let notes: Vec<SungNote> = song.notes.iter().zip(&syl).map(|(n, s)| SungNote { midi: n[0] - 12.0, beats: n[1], syl: s.clone() }).collect();
+    let plan = plan_song(&notes, &SongOptions { body: "male".into(), bpm: song.bpm, t0: 0.3, vibrato: 30.0, language: song.language });
+    // "Jaakko kulta": the /k/ releases are unaspirated
+    let wide = plan.gestures.iter().filter(|g| g.label.is_some_and(|l| l.as_str() == "aspiration")).filter_map(|g| g.targets.get(ControlKey::ABDUCTION)).fold(0.0f64, f64::max);
+    assert!(wide < 0.25, "aspiration {wide}");
+}

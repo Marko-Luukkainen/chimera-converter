@@ -198,7 +198,7 @@ fn live_notes_match_typescript() {
                 legato += o.legato_from.is_some() as usize;
                 plan_note_on(&de(&n["syl"]), midi, &o)
             }
-            "off" => plan_note_off(&de(&n["syl"]), midi, n["body"].as_str().unwrap().into()),
+            "off" => plan_note_off(&de(&n["syl"]), midi, n["body"].as_str().unwrap().into(), None),
             "melisma" => plan_melisma(midi, &de::<MelismaOptions>(&n["opts"])),
             k => panic!("{k}"),
         };

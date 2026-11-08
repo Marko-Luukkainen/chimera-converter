@@ -121,7 +121,10 @@ fn syllables_match_typescript() {
 fn songs_and_vowel_data_match_typescript() {
     let fx = load("phonetics-data");
     let mut f = Vec::new();
-    check("demo songs", &fx["songs"], songs::DEMO_SONGS, &mut f);
+    // the fixture holds the TypeScript engine's (English) songs; the Finnish demo song, added
+    // after the port, is checked in tests/finnish.rs
+    let english: Vec<_> = songs::DEMO_SONGS.iter().filter(|s| s.language.is_none()).collect();
+    check("demo songs", &fx["songs"], english, &mut f);
     check("vowel refs", &fx["vowels"], vowel_data::VOWELS, &mut f);
     report("data", 2, f);
 }

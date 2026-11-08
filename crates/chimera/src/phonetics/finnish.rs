@@ -14,7 +14,10 @@
 //! inside compounds written as one word, the coda allophones of /h/ ([ç x]), loanword exceptions.
 
 use super::english::{Phrase, is_phrase_punct, split_keeping};
-use super::{Intonation, Segment};
+use super::planner::is_vowel;
+use super::syllables::{LyricRules, SyllableParts, lyrics_with};
+use super::{Intonation, Segment, Syllable};
+use crate::anatomy::human::BodyMix;
 
 fn vowel_ipa(c: char) -> Option<&'static str> {
     Some(match c {
@@ -215,6 +218,98 @@ pub fn to_phrases(text: &str) -> Vec<Phrase> {
     }
     flush("", &mut words);
     phrases
+}
+
+// ---------------------------------------------------------------- syllables (singing)
+
+/// One word's segments → syllables. A consonant before a vowel starts the syllable, the other
+/// consonants close the one before (kis-sa, kart-ta, ra-di-o); a word's leading consonants are
+/// its first onset (stres-si). A geminate splits across the boundary, so in singing its closure
+/// falls between the two notes: "kissa" → [kis] [sɑ].
+pub fn syllabify(segs: &[Segment]) -> Vec<SyllableParts> {
+    let vi: Vec<usize> = segs.iter().enumerate().filter(|(_, s)| is_vowel(&s.ipa, BodyMix::MALE)).map(|(i, _)| i).collect();
+    let Some(&first) = vi.first() else { return Vec::new() };
+    let mut out = Vec::with_capacity(vi.len());
+    let mut onset: Vec<Segment> = segs[..first].to_vec();
+    for (n, &v) in vi.iter().enumerate() {
+        let (coda, next_onset) = match vi.get(n + 1) {
+            None => (segs[v + 1..].to_vec(), Vec::new()),
+            Some(&next) => match segs[v + 1..next].split_last() {
+                None => (Vec::new(), Vec::new()),
+                Some((last, rest)) => {
+                    let short = Segment { long: None, ..last.clone() };
+                    let mut coda = rest.to_vec();
+                    if last.long == Some(true) {
+                        coda.push(short.clone());
+                    }
+                    (coda, vec![short])
+                }
+            },
+        };
+        out.push(SyllableParts { onset: std::mem::take(&mut onset), nucleus: segs[v].clone(), coda });
+        onset = next_onset;
+    }
+    out
+}
+
+/// A written vowel letter as its base vowel (accented loan letters too), or None.
+fn base_vowel(c: char) -> Option<char> {
+    let c = c.to_lowercase().next()?;
+    Some(match c {
+        'a' | 'e' | 'i' | 'o' | 'u' | 'y' | 'ä' | 'ö' => c,
+        'å' | 'ó' | 'ò' | 'ô' | 'õ' => 'o',
+        'é' | 'è' | 'ê' | 'ë' => 'e',
+        'á' | 'à' | 'â' => 'a',
+        'í' | 'ì' | 'î' | 'ï' => 'i',
+        'ú' | 'ù' | 'û' => 'u',
+        'ü' => 'y',
+        _ => return None,
+    })
+}
+
+/// A written Finnish word split into `n` syllables for display, by the same rules as
+/// [`syllabify`] on the letters (kis-sa, ken-gät, maa-il-ma, ra-di-o). When the letters give a
+/// different count (loan spellings), the word is held whole and the rest continue ("~").
+pub fn hyphenate(w: &str, n: usize) -> Vec<String> {
+    let c: Vec<char> = w.chars().collect();
+    // the letter index where each nucleus starts and ends (exclusive)
+    let mut nuclei: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0;
+    while i < c.len() {
+        let Some(a) = base_vowel(c[i]) else {
+            i += 1;
+            continue;
+        };
+        let next = c.get(i + 1).copied().and_then(base_vowel);
+        // a long vowel, or a diphthong whose second vowel is not itself long
+        let long = next == Some(a);
+        let diphthong = next.is_some_and(|b| is_diphthong(a, b, nuclei.is_empty())) && c.get(i + 2).copied().and_then(base_vowel) != next;
+        let len = if long || diphthong { 2 } else { 1 };
+        nuclei.push((i, i + len));
+        i += len;
+    }
+    if nuclei.len() != n || n <= 1 {
+        let mut out = vec![w.to_string()];
+        out.extend(std::iter::repeat_n("~".to_string(), n.saturating_sub(1)));
+        return out;
+    }
+    let mut cuts = vec![0];
+    for k in 1..nuclei.len() {
+        let (end, start) = (nuclei[k - 1].1, nuclei[k].0);
+        cuts.push(if start > end { start - 1 } else { start });
+    }
+    cuts.push(c.len());
+    cuts.windows(2).map(|p| c[p[0]..p[1]].iter().collect()).collect()
+}
+
+fn is_letter(c: char) -> bool {
+    c.is_alphabetic() || c == '\''
+}
+
+/// Finnish lyrics → sung syllables (the same marks as English lyrics: a lone "-" or "~" holds the
+/// previous vowel onto the next note, typed hyphens split a word).
+pub fn lyrics_to_syllables(text: &str) -> Vec<Syllable> {
+    lyrics_with(text, &LyricRules { letter: is_letter, syllables: &|w| syllabify(&word(w)), spell: hyphenate })
 }
 
 // ---------------------------------------------------------------- numbers

@@ -8,8 +8,8 @@
  */
 import { create } from "zustand";
 import { engine } from "../audio/AudioEngine.ts";
-import { g2p } from "./speech.ts";
-import { lyricsToSyllables, type Syllable } from "../wasm/engine.ts";
+import { g2p, type SpeechLang } from "./speech.ts";
+import { lyricsToSyllables, finnishLyricsToSyllables, type Syllable } from "../wasm/engine.ts";
 import { planSong, planNoteOn, planNoteOff, planMelisma } from "../wasm/engine.ts";
 import { EXHALE_LABEL } from "../wasm/engine.ts";
 import { DEMO_SONGS } from "../wasm/engine.ts";
@@ -29,12 +29,20 @@ export interface RollNote {
 export const roll: { notes: RollNote[] } = { notes: [] };
 
 export const DEFAULT_LYRICS = "Hello there, I am a voice made of air.";
+export const DEFAULT_LYRICS_FI = "Hei vaan, minä olen ääni, joka on tehty ilmasta.";
+
+/** Lyrics → syllables in a language (Finnish needs no dictionary). */
+const syllablesOf = (text: string, lang: SpeechLang): Syllable[] => (lang === "fi" ? finnishLyricsToSyllables(text) : lyricsToSyllables(text));
+/** the planners' language option ("en" is their default) */
+const languageOf = (lang: SpeechLang) => (lang === "fi" ? ("fi" as const) : undefined);
 
 /** sung when the lyrics are empty */
 const AH: Syllable = { text: "ah", onset: [], nucleus: { ipa: "ɑ", stress: 1 }, coda: [], wordEnd: true, phraseEnd: false };
 
 interface SingState {
   lyrics: string;
+  /** the lyrics' language */
+  lang: SpeechLang;
   syllables: Syllable[];
   /** the syllable the next key sings */
   cursor: number;
@@ -45,12 +53,14 @@ interface SingState {
   /** index of the demo syllable being sung (−1: none yet) */
   demoAt: number;
   setLyrics: (text: string) => void;
+  setLang: (lang: SpeechLang) => void;
   setCursor: (i: number) => void;
   setVibrato: (cents: number) => void;
 }
 
 export const useSing = create<SingState>((set, get) => ({
   lyrics: DEFAULT_LYRICS,
+  lang: "en",
   syllables: lyricsToSyllables(DEFAULT_LYRICS),
   cursor: 0,
   vibrato: 35,
@@ -58,7 +68,14 @@ export const useSing = create<SingState>((set, get) => ({
   demoAt: -1,
   setLyrics: (text) => {
     stopDemo();
-    set({ lyrics: text, syllables: lyricsToSyllables(text), cursor: 0 });
+    set({ lyrics: text, syllables: syllablesOf(text, get().lang), cursor: 0 });
+  },
+  setLang: (lang) => {
+    stopDemo();
+    // untouched default lyrics follow the language
+    const s = get();
+    const lyrics = s.lyrics === DEFAULT_LYRICS && lang === "fi" ? DEFAULT_LYRICS_FI : s.lyrics === DEFAULT_LYRICS_FI && lang === "en" ? DEFAULT_LYRICS : s.lyrics;
+    set({ lang, lyrics, syllables: syllablesOf(lyrics, lang), cursor: 0 });
   },
   setCursor: (i) => set({ cursor: Math.max(0, Math.min(i, Math.max(0, get().syllables.length - 1))) }),
   setVibrato: (cents) => set({ vibrato: cents }),
@@ -71,6 +88,7 @@ export function ensureDictionary(): void {
     .load()
     .then(() => {
       const s = useSing.getState();
+      if (s.lang !== "en") return;
       const syllables = lyricsToSyllables(s.lyrics);
       useSing.setState({ syllables, cursor: Math.min(s.cursor, Math.max(0, syllables.length - 1)) });
     })
@@ -156,7 +174,8 @@ function startNote(syl: Syllable, midi: number, velocity: number, body: BodyMix,
     engine.release(from.tag + 1);
     from.note.t1 = t;
   }
-  const gs: Gesture[] = planNoteOn(syl, midi, { body, vibrato: useSing.getState().vibrato, tag, legatoFrom: from ? { syl: from.syl, midi: from.midi } : undefined });
+  const st = useSing.getState();
+  const gs: Gesture[] = planNoteOn(syl, midi, { body, vibrato: st.vibrato, tag, legatoFrom: from ? { syl: from.syl, midi: from.midi } : undefined, language: languageOf(st.lang) });
   const breath = breathFor(velocity);
   for (const g of gs) if (g.targets.breath !== undefined) g.targets = { ...g.targets, breath: g.targets.breath * breath };
   engine.scheduleGestures(gs);
@@ -202,7 +221,7 @@ export function singNoteOff(midi: number, body: BodyMix): void {
   // a melisma comes next: this vowel carries on there, and the coda waits for the chain's end
   const st = useSing.getState();
   if (st.syllables[st.cursor]?.melisma) return;
-  const gs = planNoteOff(s.syl, midi, body);
+  const gs = planNoteOff(s.syl, midi, body, languageOf(st.lang));
   if (!gs.length) return;
   const tag = nextTag;
   nextTag += 2;
@@ -246,18 +265,21 @@ export async function playDemo(name: string, body: BodyMix, ready?: () => Promis
   stopSinging();
   const token = demoToken;
   await ready?.();
-  try {
-    await g2p.load();
-  } catch {
-    // letter-to-sound rules
+  const lang: SpeechLang = song.language ?? "en";
+  if (lang === "en") {
+    try {
+      await g2p.load();
+    } catch {
+      // letter-to-sound rules
+    }
   }
   if (token !== demoToken) return;
-  const syl = lyricsToSyllables(song.lyrics);
+  const syl = syllablesOf(song.lyrics, lang);
   if (!syl.length) return;
   const shift = song.octave[nearestBody(body)] * 12;
   const notes = song.notes.map((n, i) => ({ midi: n[0] + shift, beats: n[1], syl: syl[i % syl.length] }));
   const t0 = 0.35;
-  const plan = planSong(notes, { body, bpm: song.bpm, t0, vibrato: useSing.getState().vibrato });
+  const plan = planSong(notes, { body, bpm: song.bpm, t0, vibrato: useSing.getState().vibrato, language: languageOf(lang) });
   const beat = 60 / song.bpm;
   let t = t0;
   const times = notes.map((n): [number, number] => {
@@ -270,7 +292,7 @@ export async function playDemo(name: string, body: BodyMix, ready?: () => Promis
   notes.forEach((n, i) => parent.push(n.syl.melisma && i > 0 ? parent[i - 1] : i));
   const shown = parent.map((p) => written(notes[p].syl));
   demoRun = { id, times, midi: notes.map((n) => n.midi), text: notes.map((n) => n.syl.text), shown, parent, end: plan.end, offset: null };
-  useSing.setState({ lyrics: song.lyrics, syllables: syl, cursor: 0, demo: song.name, demoAt: -1 });
+  useSing.setState({ lyrics: song.lyrics, lang, syllables: syl, cursor: 0, demo: song.name, demoAt: -1 });
 }
 
 function stopDemo(): void {

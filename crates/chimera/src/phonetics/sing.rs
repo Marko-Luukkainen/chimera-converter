@@ -14,7 +14,7 @@
 use super::inventory::phoneme;
 use crate::anatomy::human::BodyMix;
 use super::planner::{PlanOptions, diphthong_parts, plan_utterance};
-use super::{Intonation, Plan, PlannedSegment, Segment, Syllable};
+use super::{Intonation, Language, Plan, PlannedSegment, Segment, Syllable};
 use crate::control::score::{ControlKey, Gesture, Targets};
 use crate::math::{js_max, js_min};
 use serde::{Deserialize, Serialize};
@@ -91,6 +91,9 @@ pub struct SongOptions {
     pub t0: f64,
     /// vibrato depth (cents) on held vowels
     pub vibrato: f64,
+    /// the lyrics' language (Finnish: unaspirated stops, Finnish vowels; "en" when unset)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<Language>,
 }
 
 fn melisma(s: &Syllable) -> bool {
@@ -161,7 +164,7 @@ pub fn plan_song(notes: &[SungNote], o: &SongOptions) -> Plan {
         }
         if !segs.is_empty() {
             // the planner lays segments out from t0 + 0.06: start so the first vowel lands on its beat
-            let plan = plan_utterance(&segs, &PlanOptions { body: o.body, t0: times[i] - first_onset - 0.06, f0: Some(hz_of(i)), intonation: Some(Intonation::Flat), sung: Some(true), ..Default::default() });
+            let plan = plan_utterance(&segs, &PlanOptions { body: o.body, t0: times[i] - first_onset - 0.06, f0: Some(hz_of(i)), intonation: Some(Intonation::Flat), sung: Some(true), language: o.language, ..Default::default() });
             gestures.extend_from_slice(&plan.gestures);
             segments.extend(plan.segments);
             for (a, b) in vowel_spans {
@@ -206,6 +209,9 @@ pub struct NoteOnOptions {
     pub tag: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub legato_from: Option<LegatoFrom>,
+    /// the lyrics' language ("en" when unset)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<Language>,
 }
 
 /// Key pressed: sing the previous syllable's glide and coda if it is still sounding (legato),
@@ -220,7 +226,7 @@ pub fn plan_note_on(syl: &Syllable, midi: f64, o: &NoteOnOptions) -> Vec<Gesture
     segs.extend(consonants(&syl.onset, o.body, 0.7));
     let parts = diphthong_parts(&syl.nucleus.ipa);
     segs.push(Segment { ipa: parts.map_or(syl.nucleus.ipa.clone(), |p| p.0.to_string()), dur: Some(HOLD), f0: Some(hz), stress: Some(1), word_end: None, long: None });
-    let plan = plan_utterance(&segs, &PlanOptions { body: o.body, t0: LIVE_T0, f0: Some(hz), intonation: Some(Intonation::Flat), open_end: Some(true), ..Default::default() });
+    let plan = plan_utterance(&segs, &PlanOptions { body: o.body, t0: LIVE_T0, f0: Some(hz), intonation: Some(Intonation::Flat), open_end: Some(true), language: o.language, ..Default::default() });
     let vowel = &plan.segments[plan.segments.len() - 1];
     let mut out: Vec<Gesture> = plan.gestures.iter().map(|g| g.tag(if g.targets.has(ControlKey::F0) { o.tag + 1.0 } else { o.tag })).collect();
     out.push(vibrato_gesture(vowel.t0, vowel.t1, o.vibrato, Some(o.tag + 1.0)));
@@ -244,13 +250,13 @@ pub fn plan_melisma(midi: f64, o: &MelismaOptions) -> Vec<Gesture> {
 }
 
 /// Key released: the diphthong's glide and the coda (release the note's tags first).
-pub fn plan_note_off(syl: &Syllable, midi: f64, body: BodyMix) -> Vec<Gesture> {
+pub fn plan_note_off(syl: &Syllable, midi: f64, body: BodyMix, language: Option<Language>) -> Vec<Gesture> {
     let hz = midi_to_hz(midi);
     let segs = tail(syl, body, hz);
     if segs.is_empty() {
         return Vec::new();
     }
-    plan_utterance(&segs, &PlanOptions { body, t0: LIVE_T0, f0: Some(hz), intonation: Some(Intonation::Flat), ..Default::default() }).gestures
+    plan_utterance(&segs, &PlanOptions { body, t0: LIVE_T0, f0: Some(hz), intonation: Some(Intonation::Flat), language, ..Default::default() }).gestures
 }
 
 /// What follows a held vowel: the diphthong's glide (at the note's pitch) and the coda.

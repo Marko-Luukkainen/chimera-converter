@@ -117,6 +117,11 @@ export function finnishPhrases(text: string): Phrase[] {
   return call("fiPhrases", { text });
 }
 
+/** Finnish lyrics → sung syllables (rules only, like the Finnish text-to-speech). */
+export function finnishLyricsToSyllables(text: string): Syllable[] {
+  return call("fiLyricsToSyllables", { text });
+}
+
 /** One Finnish word → segments with stress and quantity. */
 export function finnishWord(w: string): Segment[] {
   return call("fiWord", { word: w });
@@ -162,11 +167,11 @@ export function planPhrases(phrases: { segments: Segment[]; intonation?: "statem
   return call("planPhrases", { phrases: phrases.map((p) => ({ segments: p.segments, intonation: p.intonation, pause: p.pause })), options });
 }
 
-export function planSong(notes: SungNote[], options: { body: BodyMix; bpm: number; t0: number; vibrato: number }): Plan {
+export function planSong(notes: SungNote[], options: { body: BodyMix; bpm: number; t0: number; vibrato: number; language?: "en" | "fi" }): Plan {
   return call("planSong", { notes, options });
 }
 
-export function planNoteOn(syl: Syllable, midi: number, options: { body: BodyMix; vibrato: number; tag: number; legatoFrom?: { syl: Syllable; midi: number } }): Gesture[] {
+export function planNoteOn(syl: Syllable, midi: number, options: { body: BodyMix; vibrato: number; tag: number; legatoFrom?: { syl: Syllable; midi: number }; language?: "en" | "fi" }): Gesture[] {
   return call("planNoteOn", { syl, midi, options });
 }
 
@@ -174,8 +179,8 @@ export function planMelisma(midi: number, options: { vibrato: number; tag: numbe
   return call("planMelisma", { midi, options });
 }
 
-export function planNoteOff(syl: Syllable, midi: number, body: BodyMix): Gesture[] {
-  return call("planNoteOff", { syl, midi, body });
+export function planNoteOff(syl: Syllable, midi: number, body: BodyMix, language?: "en" | "fi"): Gesture[] {
+  return call("planNoteOff", { syl, midi, body, language });
 }
 
 /** Smooth activation 0..1..0 with cosine ramps (for drawing the score; the engine's own blend uses its Rust twin). */

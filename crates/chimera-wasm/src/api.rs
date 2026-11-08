@@ -127,6 +127,7 @@ fn dispatch(st: &mut State, req: &Value) -> Res {
         "g2pWord" => to_json(&st.g2p.word(&arg::<String>(req, "word")?, arg::<Option<bool>>(req, "reduce")?.unwrap_or(true))),
         "fiPhrases" => to_json(&finnish::to_phrases(&arg::<String>(req, "text")?)),
         "fiWord" => to_json(&finnish::word(&arg::<String>(req, "word")?)),
+        "fiLyricsToSyllables" => to_json(&finnish::lyrics_to_syllables(&arg::<String>(req, "text")?)),
         "lyricsToSyllables" => to_json(&syllables::lyrics_to_syllables(&arg::<String>(req, "text")?, &st.g2p)),
         // ---------------------------------------------------------------- creatures
         "creaturePreview" => {
@@ -147,7 +148,7 @@ fn dispatch(st: &mut State, req: &Value) -> Res {
         "planPhrases" => to_json(&planner::plan_phrases(&arg::<Vec<PhraseInput>>(req, "phrases")?, &arg::<PlanOptions>(req, "options")?)),
         "planSong" => to_json(&sing::plan_song(&arg::<Vec<SungNote>>(req, "notes")?, &arg::<SongOptions>(req, "options")?)),
         "planNoteOn" => to_json(&sing::plan_note_on(&arg::<Syllable>(req, "syl")?, arg(req, "midi")?, &arg::<NoteOnOptions>(req, "options")?)),
-        "planNoteOff" => to_json(&sing::plan_note_off(&arg::<Syllable>(req, "syl")?, arg(req, "midi")?, arg::<BodyMix>(req, "body")?)),
+        "planNoteOff" => to_json(&sing::plan_note_off(&arg::<Syllable>(req, "syl")?, arg(req, "midi")?, arg::<BodyMix>(req, "body")?, arg(req, "language")?)),
         "planMelisma" => to_json(&sing::plan_melisma(arg(req, "midi")?, &arg::<MelismaOptions>(req, "options")?)),
         // ---------------------------------------------------------------- beatbox
         "parseBeat" => to_json(&beatbox::parse_beat(&arg::<String>(req, "text")?)),

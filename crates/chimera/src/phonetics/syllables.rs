@@ -151,8 +151,9 @@ fn is_word_start(c: char) -> bool {
     c.is_ascii_alphabetic() || c == '\''
 }
 
-/// `text.match(/[A-Za-z'][A-Za-z'\-]*|(?<=\s|^)[~-](?=\s|$)|[.,;:!?\n]/g)`
-fn lyric_tokens(text: &str) -> Vec<String> {
+/// `text.match(/[A-Za-z'][A-Za-z'\-]*|(?<=\s|^)[~-](?=\s|$)|[.,;:!?\n]/g)`, with the
+/// language's letters in place of `[A-Za-z']`.
+fn lyric_tokens(text: &str, is_word_start: fn(char) -> bool) -> Vec<String> {
     let s: Vec<char> = text.chars().collect();
     let mut out = Vec::new();
     let mut i = 0;
@@ -176,11 +177,27 @@ fn lyric_tokens(text: &str) -> Vec<String> {
     out
 }
 
+/// What a language brings to lyrics → syllables: its letters, a word's syllables, and how the
+/// written word splits to match them for display.
+pub struct LyricRules<'a> {
+    /// a character that starts a word or continues one (with `-`)
+    pub letter: fn(char) -> bool,
+    /// one word (no hyphens) → its syllables
+    pub syllables: &'a dyn Fn(&str) -> Vec<SyllableParts>,
+    /// a written word split into `n` display chunks
+    pub spell: fn(&str, usize) -> Vec<String>,
+}
+
 /// Lyrics text → syllables (needs the pronouncing dictionary for real words).
 pub fn lyrics_to_syllables(text: &str, g2p: &impl WordSource) -> Vec<Syllable> {
+    lyrics_with(text, &LyricRules { letter: is_word_start, syllables: &|w| syllabify_segments(&g2p.word(&w.to_lowercase(), false)), spell: split_spelling })
+}
+
+/// Lyrics text → syllables by a language's rules.
+pub fn lyrics_with(text: &str, rules: &LyricRules) -> Vec<Syllable> {
     let mut out: Vec<Syllable> = Vec::new();
     // words, melisma marks and phrase punctuation, in order
-    let tokens = lyric_tokens(&text.replace('’', "'"));
+    let tokens = lyric_tokens(&text.replace('’', "'"), rules.letter);
     for tok in &tokens {
         if tok.chars().count() == 1 && tok.chars().all(is_lyric_punct) {
             if let Some(last) = out.last_mut() {
@@ -199,13 +216,13 @@ pub fn lyrics_to_syllables(text: &str, g2p: &impl WordSource) -> Vec<Syllable> {
         let parts: Vec<&str> = tok.split('-').filter(|p| !p.is_empty()).collect();
         let mut syls: Vec<Syllable> = Vec::new();
         for part in &parts {
-            let sy = syllabify_segments(&g2p.word(&part.to_lowercase(), false));
+            let sy = (rules.syllables)(part);
             let spell: Vec<String> = if parts.len() > 1 {
                 let mut v = vec![part.to_string()];
                 v.extend(std::iter::repeat_n("~".to_string(), sy.len().saturating_sub(1)));
                 v
             } else {
-                split_spelling(part, sy.len())
+                (rules.spell)(part, sy.len())
             };
             for (i, s) in sy.into_iter().enumerate() {
                 syls.push(Syllable { text: spell.get(i).cloned().unwrap_or_else(|| "~".into()), onset: s.onset, nucleus: s.nucleus, coda: s.coda, melisma: None, word_end: false, phrase_end: false });
