@@ -148,12 +148,12 @@ pub fn plan_song(notes: &[SungNote], o: &SongOptions) -> Plan {
             let parts = diphthong_parts(&n.syl.nucleus.ipa);
             match parts {
                 Some((a, b)) if !next_melisma => {
-                    segs.push(Segment { ipa: a.to_string(), dur: Some(vdur * 0.8), f0: Some(hz), stress: Some(1), word_end: None });
-                    segs.push(Segment { ipa: b.to_string(), dur: Some(vdur * 0.2), f0: Some(hz), stress: Some(1), word_end: None });
+                    segs.push(Segment { ipa: a.to_string(), dur: Some(vdur * 0.8), f0: Some(hz), stress: Some(1), word_end: None, long: None });
+                    segs.push(Segment { ipa: b.to_string(), dur: Some(vdur * 0.2), f0: Some(hz), stress: Some(1), word_end: None, long: None });
                 }
                 _ => {
                     let ipa = parts.map_or(n.syl.nucleus.ipa.clone(), |p| p.0.to_string());
-                    segs.push(Segment { ipa, dur: Some(vdur), f0: Some(hz), stress: Some(1), word_end: None });
+                    segs.push(Segment { ipa, dur: Some(vdur), f0: Some(hz), stress: Some(1), word_end: None, long: None });
                 }
             }
             segs.extend(coda);
@@ -219,7 +219,7 @@ pub fn plan_note_on(syl: &Syllable, midi: f64, o: &NoteOnOptions) -> Vec<Gesture
     }
     segs.extend(consonants(&syl.onset, o.body, 0.7));
     let parts = diphthong_parts(&syl.nucleus.ipa);
-    segs.push(Segment { ipa: parts.map_or(syl.nucleus.ipa.clone(), |p| p.0.to_string()), dur: Some(HOLD), f0: Some(hz), stress: Some(1), word_end: None });
+    segs.push(Segment { ipa: parts.map_or(syl.nucleus.ipa.clone(), |p| p.0.to_string()), dur: Some(HOLD), f0: Some(hz), stress: Some(1), word_end: None, long: None });
     let plan = plan_utterance(&segs, &PlanOptions { body: o.body, t0: LIVE_T0, f0: Some(hz), intonation: Some(Intonation::Flat), open_end: Some(true), ..Default::default() });
     let vowel = &plan.segments[plan.segments.len() - 1];
     let mut out: Vec<Gesture> = plan.gestures.iter().map(|g| g.tag(if g.targets.has(ControlKey::F0) { o.tag + 1.0 } else { o.tag })).collect();
@@ -258,7 +258,7 @@ fn tail(syl: &Syllable, body: BodyMix, hz: f64) -> Vec<Segment> {
     let parts = diphthong_parts(&syl.nucleus.ipa);
     let mut out: Vec<Segment> = Vec::new();
     if let Some((_, b)) = parts {
-        out.push(Segment { ipa: b.to_string(), dur: Some(0.07), stress: Some(1), f0: Some(hz), word_end: None });
+        out.push(Segment { ipa: b.to_string(), dur: Some(0.07), stress: Some(1), f0: Some(hz), word_end: None, long: None });
     }
     out.extend(consonants(&syl.coda, body, 0.7));
     out

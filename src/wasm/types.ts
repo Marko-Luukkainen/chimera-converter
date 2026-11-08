@@ -155,6 +155,8 @@ export interface Segment {
   stress?: number;
   f0?: number;
   wordEnd?: boolean;
+  /** phonemically long (Finnish quantity) */
+  long?: boolean;
 }
 
 export interface PlannedSegment {

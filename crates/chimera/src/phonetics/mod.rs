@@ -1,4 +1,4 @@
-//! Phonetics: IPA, English G2P, syllables, durations, the gestural planner, singing, beatbox.
+//! Phonetics: IPA, English and Finnish G2P, syllables, durations, the gestural planner, singing, beatbox.
 //! These run off the audio thread (they allocate); their output is a [`Plan`] of gestures that a
 //! voice plays.
 
@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub mod beatbox;
 pub mod durations;
 pub mod english;
+pub mod finnish;
 pub mod inventory;
 pub mod ipa;
 pub mod planner;
@@ -33,6 +34,9 @@ pub struct Segment {
     /// word boundary after this segment
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub word_end: Option<bool>,
+    /// phonemically long (Finnish quantity: "tuuli", "tulli"); lengthens the rule duration
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub long: Option<bool>,
 }
 
 impl Segment {

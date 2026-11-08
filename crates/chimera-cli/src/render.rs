@@ -12,7 +12,7 @@ use chimera::creatures::voice::CreatureVoice;
 use chimera::creatures::{CREATURES, creature_by_id};
 use chimera::math::{js_max, js_min, js_round, log10};
 use chimera::phonetics::beatbox::{BEAT_PRESETS, BEAT_SOUNDS, BeatStep, beat_ready, parse_beat};
-use chimera::phonetics::english::EnglishG2P;
+use chimera::phonetics::english::{EnglishG2P, Phrase};
 use chimera::phonetics::ipa::tokenize_ipa;
 use chimera::phonetics::planner::{
     PhraseInput, PlanOptions, plan_phrases, plan_utterance, vowel_table,
@@ -128,21 +128,51 @@ pub fn text(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let name = arg(a, 0, "out/text");
     let text = arg(a, 1, "Hello world.");
     let body_name = arg(a, 2, "male");
+    let g = g2p()?;
+    render_phrases(ctx, name, body_name, &g.to_phrases(text))
+}
+
+/// Finnish text through the Finnish G2P and the phrase planner.
+/// `render fi <out> ["Suomenkielinen teksti."] [body]`
+pub fn finnish(ctx: &Ctx, a: &[String]) -> Result<(), String> {
+    let name = arg(a, 0, "out/fi");
+    let text = arg(a, 1, "Hyvää huomenta.");
+    let body_name = arg(a, 2, "male");
+    render_phrases(
+        ctx,
+        name,
+        body_name,
+        &chimera::phonetics::finnish::to_phrases(text),
+    )
+}
+
+/// Phrases (from either G2P) planned and rendered to `<name>.wav`, the transcription printed.
+fn render_phrases(
+    ctx: &Ctx,
+    name: &str,
+    body_name: &str,
+    phrases: &[Phrase],
+) -> Result<(), String> {
     let b = body(body_name)?;
     let f0 = match body_name {
         "female" => 205.0,
         "child" => 250.0,
         _ => 112.0,
     };
-    let g = g2p()?;
-    let phrases = g.to_phrases(text);
     let shown: Vec<String> = phrases
         .iter()
         .map(|p| {
             let s: String = p
                 .segments
                 .iter()
-                .map(|s| format!("{}{}", if s.stress == Some(1) { "ˈ" } else { "" }, s.ipa))
+                .map(|s| {
+                    format!(
+                        "{}{}{}",
+                        if s.stress == Some(1) { "ˈ" } else { "" },
+                        s.ipa,
+                        if s.long == Some(true) { "ː" } else { "" }
+                    )
+                })
                 .collect();
             s + if p.intonation == Intonation::Question {
                 "?"

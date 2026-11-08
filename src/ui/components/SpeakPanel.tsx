@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store.ts";
-import { speakText, speakPhrases, stopSpeaking, onPlan, currentPlan, spokenWordNow } from "../speech.ts";
+import { speakText, speakPhrases, stopSpeaking, onPlan, currentPlan, spokenWordNow, type SpeechLang } from "../speech.ts";
 import { mouthWords } from "../mouthWords.ts";
 import { tokenizeIpa } from "../../wasm/engine.ts";
 import { Slider, Toggle } from "./Controls.tsx";
@@ -13,6 +13,11 @@ import { V } from "../colors.ts";
 import { engine } from "../../audio/AudioEngine.ts";
 
 const EXAMPLES = ["Hello. Can you hear me?", "She sells sea shells by the sea shore.", "Every sound here is air moving through a throat.", "The quick brown fox jumps over the lazy dog."];
+const EXAMPLES_FI = ["Hyvää huomenta. Kuuletko minua?", "Kokko, kokoo koko kokko kokoon.", "Jokainen ääni on ilmaa, joka virtaa kurkun läpi.", "Tuuli tuli tulliin."];
+const LANGS: { value: SpeechLang; label: string; title: string }[] = [
+  { value: "en", label: "EN", title: "English" },
+  { value: "fi", label: "FI", title: "Finnish (suomi)" },
+];
 
 // IPA pulmonic consonant chart (rows = manner, columns = place); empty cells are null
 const PLACES = ["Bilabial", "Labiodental", "Dental", "Alveolar", "Postalveolar", "Retroflex", "Palatal", "Velar", "Uvular", "Pharyngeal", "Glottal"];
@@ -119,6 +124,7 @@ export function SpeakRight() {
   const start = useStore((s) => s.start);
   const [text, setText] = useState(EXAMPLES[0]);
   const [ipa, setIpa] = useState(false);
+  const [lang, setLang] = useState<SpeechLang>("en");
   const [rate, setRate] = useState(1);
   const [busy, setBusy] = useState(false);
   const [trans, setTrans] = useState(currentPlan()?.transcription ?? "");
@@ -129,10 +135,17 @@ export function SpeakRight() {
     setBusy(true);
     try {
       await start();
-      await speakText(text, { ipa, body, rate, f0 });
+      await speakText(text, { ipa, lang, body, rate, f0 });
     } finally {
       setBusy(false);
     }
+  };
+  const pickLang = (l: SpeechLang) => {
+    // an untouched example follows the language
+    const [from, to] = l === "fi" ? [EXAMPLES, EXAMPLES_FI] : [EXAMPLES_FI, EXAMPLES];
+    const k = from.indexOf(text);
+    if (k >= 0) setText(to[k]);
+    setLang(l);
   };
   const pad = async (c: string) => {
     await start();
@@ -141,7 +154,18 @@ export function SpeakRight() {
 
   return (
     <div className="right right-speak">
-      <Screen className="s-say" title="Say" sub="Text to speech" tools={<Toggle label="Text is IPA" checked={ipa} onChange={setIpa} />}>
+      <Screen className="s-say" title="Say" sub="Text to speech" tools={
+          <>
+            <div className="vowel-pick" role="group" aria-label="Language">
+              {LANGS.map((l) => (
+                <Chip key={l.value} on={!ipa && lang === l.value} disabled={ipa} title={l.title} onClick={() => pickLang(l.value)}>
+                  {l.label}
+                </Chip>
+              ))}
+            </div>
+            <Toggle label="Text is IPA" checked={ipa} onChange={setIpa} />
+          </>
+        }>
         <div className="say">
           <div className="say-row">
             <textarea
@@ -153,8 +177,9 @@ export function SpeakRight() {
               }}
               rows={2}
               spellCheck={!ipa}
+              lang={ipa ? undefined : lang}
               aria-label={ipa ? "IPA to speak" : "Text to speak"}
-              placeholder={ipa ? "Type IPA, for example ˈhɛloʊ" : "Type something for the voice to say"}
+              placeholder={ipa ? "Type IPA, for example ˈhɛloʊ" : lang === "fi" ? "Kirjoita jotain sanottavaa" : "Type something for the voice to say"}
             />
             <div className="say-actions">
               <button className="primary" onClick={() => void speak()} disabled={busy}>
@@ -174,7 +199,7 @@ export function SpeakRight() {
             </div>
           </div>
           <div className="examples" role="group" aria-label="Examples">
-            {EXAMPLES.map((ex) => (
+            {(lang === "fi" ? EXAMPLES_FI : EXAMPLES).map((ex) => (
               <Chip
                 key={ex}
                 toggle={false}

@@ -102,7 +102,7 @@ pub(crate) fn js_is_space(c: char) -> bool {
     matches!(c, '\t' | '\n' | '\u{B}' | '\u{C}' | '\r' | ' ' | '\u{A0}' | '\u{1680}' | '\u{2000}'..='\u{200A}' | '\u{2028}' | '\u{2029}' | '\u{202F}' | '\u{205F}' | '\u{3000}' | '\u{FEFF}')
 }
 
-fn is_phrase_punct(c: char) -> bool {
+pub(crate) fn is_phrase_punct(c: char) -> bool {
     matches!(c, '.' | '!' | '?' | ';' | ':' | ',')
 }
 
@@ -213,7 +213,7 @@ impl WordSource for EnglishG2P {
 }
 
 /// `s.split(/(<class>+)/)`: the pieces between runs of delimiter characters, with the runs.
-fn split_keeping(s: &str, delim: fn(char) -> bool) -> Vec<String> {
+pub(crate) fn split_keeping(s: &str, delim: fn(char) -> bool) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
     let mut chars = s.chars().peekable();

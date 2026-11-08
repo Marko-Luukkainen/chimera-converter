@@ -12,6 +12,7 @@ use chimera::phonetics::beatbox::{self, BeatStep};
 use chimera::phonetics::planner::{self, PhraseInput, PlanOptions};
 use chimera::phonetics::sing::{self, MelismaOptions, NoteOnOptions, SongOptions, SungNote};
 use chimera::phonetics::english::EnglishG2P;
+use chimera::phonetics::finnish;
 use chimera::phonetics::{Segment, Syllable, ipa, songs, syllables, vowel_data};
 use chimera::voice::human_airway::HumanAirway;
 use serde_json::{Value, json};
@@ -124,6 +125,8 @@ fn dispatch(st: &mut State, req: &Value) -> Res {
         }
         "g2pPhrases" => to_json(&st.g2p.to_phrases(&arg::<String>(req, "text")?)),
         "g2pWord" => to_json(&st.g2p.word(&arg::<String>(req, "word")?, arg::<Option<bool>>(req, "reduce")?.unwrap_or(true))),
+        "fiPhrases" => to_json(&finnish::to_phrases(&arg::<String>(req, "text")?)),
+        "fiWord" => to_json(&finnish::word(&arg::<String>(req, "word")?)),
         "lyricsToSyllables" => to_json(&syllables::lyrics_to_syllables(&arg::<String>(req, "text")?, &st.g2p)),
         // ---------------------------------------------------------------- creatures
         "creaturePreview" => {

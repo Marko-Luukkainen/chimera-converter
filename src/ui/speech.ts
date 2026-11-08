@@ -1,6 +1,6 @@
 /** Main-thread speech planning: text/IPA → phrases → gestural plan → worklet. */
 import type { BodyMix } from "../wasm/types.ts";
-import { EnglishG2P, type Phrase } from "../wasm/engine.ts";
+import { EnglishG2P, finnishPhrases, type Phrase } from "../wasm/engine.ts";
 import { tokenizeIpa } from "../wasm/engine.ts";
 import { planPhrases, type Plan, type Segment } from "../wasm/engine.ts";
 import { engine } from "../audio/AudioEngine.ts";
@@ -48,7 +48,7 @@ export function ipaToPhrases(text: string): Phrase[] {
 }
 
 export function transcribe(phrases: { segments: Segment[]; intonation?: string }[]): string {
-  return phrases.map((p) => p.segments.map((s) => (s.stress === 1 ? "ˈ" : s.stress === 2 ? "ˌ" : "") + s.ipa + (s.wordEnd ? " " : "")).join("").trim() + (p.intonation === "question" ? "?" : "")).join(" | ");
+  return phrases.map((p) => p.segments.map((s) => (s.stress === 1 ? "ˈ" : s.stress === 2 ? "ˌ" : "") + s.ipa + (s.long ? "ː" : "") + (s.wordEnd ? " " : "")).join("").trim() + (p.intonation === "question" ? "?" : "")).join(" | ");
 }
 
 export function speakPhrases(phrases: { segments: Segment[]; intonation?: "statement" | "question" | "flat"; pause?: number; words?: string[] }[], o: { body: BodyMix; rate: number; f0: number }): SpokenPlan {
@@ -59,10 +59,14 @@ export function speakPhrases(phrases: { segments: Segment[]; intonation?: "state
   return current;
 }
 
-export async function speakText(text: string, o: { ipa: boolean; body: BodyMix; rate: number; f0: number }): Promise<SpokenPlan | null> {
+/** Languages the text-to-speech front end reads. */
+export type SpeechLang = "en" | "fi";
+
+export async function speakText(text: string, o: { ipa: boolean; lang?: SpeechLang; body: BodyMix; rate: number; f0: number }): Promise<SpokenPlan | null> {
   if (!text.trim()) return null;
   let phrases: Phrase[];
   if (o.ipa) phrases = ipaToPhrases(text);
+  else if (o.lang === "fi") phrases = finnishPhrases(text);
   else {
     try {
       await g2p.load();

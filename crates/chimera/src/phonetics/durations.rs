@@ -3,7 +3,8 @@
 //! with PRCNT the product of context factors: phrase-final lengthening, non-final shortening,
 //! non-word-final and polysyllabic shortening, unstressed shortening (MIN halved), the vowel
 //! length cue of the following consonant (bat/bad), cluster shortening, and aspiration.
-//! Inherent / minimum durations (ms) per phoneme follow Klatt's table.
+//! Inherent / minimum durations (ms) per phoneme follow Klatt's table. A long segment (Finnish
+//! quantity) is scaled by [`LONG`] after the rules.
 
 use super::Segment;
 use super::inventory::Manner;
@@ -169,7 +170,7 @@ pub fn klatt_durations(segs: &[Segment], info: impl Fn(&Segment) -> SegInfo) -> 
                 if stress > 0 && pv.is_some_and(|pv| pv.manner == Some(Manner::Stop) && pv.voiced != Some(true)) {
                     d += 20.0;
                 }
-                return d / 1000.0;
+                return d / 1000.0 * long_factor(s);
             }
             // consonants
             let word_initial = i == word_start[word[i]];
@@ -186,7 +187,15 @@ pub fn klatt_durations(segs: &[Segment], info: impl Fn(&Segment) -> SegInfo) -> 
             } else if prev_c || next_c {
                 p *= 0.7;
             }
-            (min + (inh - min) * p) / 1000.0
+            (min + (inh - min) * p) / 1000.0 * long_factor(s)
         })
         .collect()
+}
+
+/// A phonemically long segment ([`Segment::long`], Finnish quantity) lasts about twice its rule
+/// duration: long vowels and geminate consonants run at roughly 2× their short counterparts.
+const LONG: f64 = 2.0;
+
+fn long_factor(s: &Segment) -> f64 {
+    if s.long == Some(true) { LONG } else { 1.0 }
 }

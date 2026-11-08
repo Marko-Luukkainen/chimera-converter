@@ -9,8 +9,9 @@ for tests and the `chimera` CLI.
 
 - **Play**: drag the tongue, lips and jaw in a live cutaway of the head; vowel pad, encoders,
   computer keyboard and Web MIDI.
-- **Speak**: English text (CMUdict with a letter-to-sound fallback) or IPA, turned into
-  gestures and prosody, with the gestural score and a consonant chart on screen.
+- **Speak**: English text (CMUdict with a letter-to-sound fallback), Finnish text (spelling
+  rules, first-syllable stress, long vowels and geminates) or IPA, turned into gestures and
+  prosody, with the gestural score and a consonant chart on screen.
 - **Sing**: piano roll with lyrics per note; consonants land before the beat.
 - **Beatbox**: pads and a step sequencer, every drum an articulatory gesture.
 - **Bestiary**: songbird (two-voice syrinx), seal, alligator and elephant.
@@ -35,7 +36,7 @@ The AudioWorklet needs a secure context, so open it on localhost or over HTTPS (
 Offline renders and measurement:
 
 ```sh
-cargo run --release -p chimera-cli -- render speech|text|song|notes|beatbox|creature|vowels …
+cargo run --release -p chimera-cli -- render speech|text|fi|song|notes|beatbox|creature|vowels …
 cargo run --release -p chimera-cli -- diagnose       # nasal leakage, formants, bandwidths, pitch
 cargo run --release -p chimera-cli -- compare csd    # against a real singer (docs/csd-comparison.md)
 bun tools/spectrogram.ts in.wav out.png

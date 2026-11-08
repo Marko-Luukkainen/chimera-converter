@@ -112,6 +112,16 @@ export class EnglishG2P {
   }
 }
 
+/** Finnish text → phrases of segments (rules only: Finnish spelling needs no dictionary). */
+export function finnishPhrases(text: string): Phrase[] {
+  return call("fiPhrases", { text });
+}
+
+/** One Finnish word → segments with stress and quantity. */
+export function finnishWord(w: string): Segment[] {
+  return call("fiWord", { word: w });
+}
+
 /** Lyrics → sung syllables, through the page's dictionary (see EnglishG2P). */
 export function lyricsToSyllables(text: string): Syllable[] {
   return call("lyricsToSyllables", { text });
