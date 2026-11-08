@@ -4,7 +4,7 @@
 //!
 //! Syllable nuclei follow the diphthong rules: a vowel + i, a vowel + u/y, and the opening
 //! diphthongs ie uo yö only in the first syllable; any other pair of vowels is two syllables
-//! (ra-di-o). Primary stress is on the first syllable, secondary stress on the odd syllables after
+//! (ra-di-o). A diphthong is one segment ("ɑi", "uo"); the planner glides between its parts. Primary stress is on the first syllable, secondary stress on the odd syllables after
 //! it but never on the last (kir-joit-ta-mi-nen → 1 0 2 0 0).
 //!
 //! A question mark keeps the statement fall: Finnish marks questions with -ko/-kö or a question
@@ -130,26 +130,31 @@ fn is_diphthong(a: char, b: char, first: bool) -> bool {
     }
 }
 
-/// One word (no spaces or hyphens) → segments with stress on each syllable nucleus.
+/// One word (no spaces or hyphens) → segments with stress on each syllable nucleus. A diphthong
+/// is one segment of two vowels ("ɑi"), which the planner splits into its two targets.
 fn simple_word(w: &str) -> Vec<Segment> {
     let ph = phones(w);
-    // the phone index where each syllable nucleus starts
+    let mut segs: Vec<Segment> = Vec::with_capacity(ph.len());
+    // the segment index of each syllable nucleus
     let mut nuclei: Vec<usize> = Vec::new();
     let mut i = 0;
     while i < ph.len() {
-        let Some(a) = ph[i].vowel else {
+        let p = &ph[i];
+        let mut seg = Segment { ipa: p.ipa.to_string(), stress: Some(0), long: p.long.then_some(true), ..Default::default() };
+        let Some(a) = p.vowel else {
+            segs.push(seg);
             i += 1;
             continue;
         };
         let first = nuclei.is_empty();
-        nuclei.push(i);
-        let joins = !ph[i].long && ph.get(i + 1).is_some_and(|n| !n.long && n.vowel.is_some_and(|b| is_diphthong(a, b, first)));
+        let joins = !p.long && ph.get(i + 1).is_some_and(|n| !n.long && n.vowel.is_some_and(|b| is_diphthong(a, b, first)));
+        if joins {
+            seg.ipa.push_str(ph[i + 1].ipa);
+        }
+        nuclei.push(segs.len());
+        segs.push(seg);
         i += if joins { 2 } else { 1 };
     }
-    let mut segs: Vec<Segment> = ph
-        .iter()
-        .map(|p| Segment { ipa: p.ipa.to_string(), stress: Some(0), long: p.long.then_some(true), ..Default::default() })
-        .collect();
     let n = nuclei.len();
     for (k, &at) in nuclei.iter().enumerate() {
         segs[at].stress = Some(if k == 0 {

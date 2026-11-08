@@ -26,7 +26,7 @@ fn letters_and_length() {
     assert_eq!(show("tuli"), "t ˈu l i");
     assert_eq!(show("tuuli"), "t ˈuː l i");
     assert_eq!(show("tulli"), "t ˈu lː i");
-    assert_eq!(show("pöytä"), "p ˈø y t æ");
+    assert_eq!(show("pöytä"), "p ˈøy t æ");
     assert_eq!(show("vesi"), "ʋ ˈe s i");
 }
 
@@ -40,24 +40,42 @@ fn velar_nasal_and_voiced_h() {
 
 #[test]
 fn diphthongs_and_syllables() {
-    // ie uo yö are diphthongs only in the first syllable
-    assert_eq!(show("tie"), "t ˈi e");
-    assert_eq!(show("suomi"), "s ˈu o m i");
+    // a diphthong is one segment; ie uo yö are diphthongs only in the first syllable
+    assert_eq!(show("tie"), "t ˈie");
+    assert_eq!(show("suomi"), "s ˈuo m i");
     // ra-di-o: the third syllable is the last, so no secondary stress
     assert_eq!(show("radio"), "r ˈɑ d i o");
     // kor-ke-aa: a long vowel after a short one is its own syllable
     assert_eq!(show("korkeaa"), "k ˈo r k e ɑː");
     // maa-il-ma: a long vowel never joins the next vowel
     assert_eq!(show("maailma"), "m ˈɑː i l m ɑ");
+    // the opening diphthongs only start a word: ty-ö is a diphthong, but another vowel pair inside a word is two syllables
+    assert_eq!(show("yö"), "ˈyø");
+    assert_eq!(show("koulu"), "k ˈou l u");
+    assert_eq!(show("sauna"), "s ˈɑu n ɑ");
+}
+
+/// Every diphthong the G2P can emit expands to two vowel targets in the planner.
+#[test]
+fn every_diphthong_expands() {
+    use chimera::phonetics::planner::diphthong_parts;
+    let words = "laiva leipä koira uida lyijy äiti öisin sauna leuka kiuas koulu leyhyä siistiytyä täysi löyly tie suo yö";
+    for w in words.split(' ') {
+        for s in word(w) {
+            if s.ipa.chars().count() > 1 && !["ts"].contains(&s.ipa.as_str()) {
+                assert!(diphthong_parts(&s.ipa).is_some(), "{w}: {} does not expand", s.ipa);
+            }
+        }
+    }
 }
 
 #[test]
 fn secondary_stress_on_odd_syllables_but_not_the_last() {
     // kir-joit-ta-mi-nen
-    assert_eq!(show("kirjoittaminen"), "k ˈi r j o i tː ˌɑ m i n e n");
+    assert_eq!(show("kirjoittaminen"), "k ˈi r j oi tː ˌɑ m i n e n");
     assert_eq!(show("talo"), "t ˈɑ l o");
     // a hyphenated compound stresses each part
-    assert_eq!(show("linja-auto"), "l ˈi n j ɑ ˈɑ u t o");
+    assert_eq!(show("linja-auto"), "l ˈi n j ɑ ˈɑu t o");
 }
 
 #[test]

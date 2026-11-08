@@ -52,6 +52,33 @@ pub fn expand(ipa: &str) -> Option<&'static [&'static str]> {
         "eɪ" => &["e", "i"],
         "oʊ" => &["o", "u"],
         "ɚ" => &["ɝ"],
+        _ => return finnish_diphthong(ipa),
+    })
+}
+
+/// The 18 Finnish diphthongs (the Finnish G2P emits each as one segment). Unlike the American
+/// offglides they aim at full [i u y] targets, and the opening ones (ie uo yø) glide from a close
+/// vowel to a mid one; the overlapping vowel gestures supply the undershoot of running speech.
+fn finnish_diphthong(ipa: &str) -> Option<&'static [&'static str]> {
+    Some(match ipa {
+        "ɑi" => &["ɑ", "i"],
+        "ei" => &["e", "i"],
+        "oi" => &["o", "i"],
+        "ui" => &["u", "i"],
+        "yi" => &["y", "i"],
+        "æi" => &["æ", "i"],
+        "øi" => &["ø", "i"],
+        "ɑu" => &["ɑ", "u"],
+        "eu" => &["e", "u"],
+        "iu" => &["i", "u"],
+        "ou" => &["o", "u"],
+        "ey" => &["e", "y"],
+        "iy" => &["i", "y"],
+        "æy" => &["æ", "y"],
+        "øy" => &["ø", "y"],
+        "ie" => &["i", "e"],
+        "uo" => &["u", "o"],
+        "yø" => &["y", "ø"],
         _ => return None,
     })
 }
