@@ -329,3 +329,181 @@ fn finnish_vowels_reach_the_audio() {
         }
     }
 }
+
+// ---------------------------------------------------------------- R, S, T in rendered speech
+
+/// A Finnish word rendered: the plan, the samples, and per control block (128 samples) the
+/// narrowest oral area (cm²) and the glottis's voicing (0..1).
+struct Rendered {
+    plan: chimera::phonetics::Plan,
+    out: Vec<f32>,
+    area: Vec<f64>,
+    voicing: Vec<f64>,
+}
+
+const FS: f64 = 48000.0;
+const BLOCK: f64 = 128.0 / FS;
+const VOICES: [(&str, f64); 2] = [("male", 112.0), ("female", 205.0)];
+
+fn render_fi(w: &str, body: &str, f0: f64) -> Rendered {
+    use chimera::anatomy::human::{BODY_FEMALE, BODY_MALE};
+    use chimera::voice::human_voice::{HumanVoice, SourcePatch};
+    let mut segs = word(w);
+    segs.last_mut().unwrap().word_end = Some(true);
+    let plan = plan_utterance(&segs, &PlanOptions { body: body.into(), t0: 0.05, f0: Some(f0), language: Some(Language::Finnish), ..Default::default() });
+    let mut v = HumanVoice::new(FS, if body == "female" { BODY_FEMALE } else { BODY_MALE }, 2);
+    v.set_source(&SourcePatch::f0(f0));
+    v.schedule(&plan.gestures);
+    let mut out = vec![0f32; (FS * (plan.end + 0.2)) as usize];
+    let (mut area, mut voicing) = (Vec::new(), Vec::new());
+    for c in out.chunks_mut(128) {
+        v.render(c);
+        area.push(v.airway.or_areas.iter().cloned().fold(f64::INFINITY, f64::min));
+        voicing.push(v.glottis.voicing);
+    }
+    Rendered { plan, out, area, voicing }
+}
+
+impl Rendered {
+    fn block(&self, t: f64) -> usize {
+        ((t / BLOCK) as usize).min(self.area.len() - 1)
+    }
+    fn rms(&self, a: f64, b: f64) -> f64 {
+        let (a, b) = ((a * FS) as usize, (b * FS) as usize);
+        (self.out[a..b].iter().map(|x| (*x as f64).powi(2)).sum::<f64>() / (b - a).max(1) as f64).sqrt()
+    }
+    fn loudest_vowel(&self) -> f64 {
+        self.plan.segments.iter().filter(|s| s.kind == "vowel").map(|s| self.rms(s.t0, s.t1)).fold(0.0, f64::max)
+    }
+    /// 4 ms frame levels (dB re the loudest vowel) over [a, b]
+    fn frames_db(&self, a: f64, b: f64) -> Vec<f64> {
+        let v = self.loudest_vowel();
+        let mut out = Vec::new();
+        let mut t = a;
+        while t + 0.004 <= b {
+            out.push(20.0 * (self.rms(t, t + 0.004) / v + 1e-9).log10());
+            t += 0.004;
+        }
+        out
+    }
+    fn seg(&self, ipa: &str, nth: usize) -> &PlannedSegment {
+        self.plan.segments.iter().filter(|s| s.ipa == ipa).nth(nth).unwrap_or_else(|| panic!("no {ipa} #{nth}"))
+    }
+    /// share of [a, b] with the folds vibrating
+    fn voiced(&self, a: f64, b: f64) -> f64 {
+        let (x, y) = (self.block(a), self.block(b));
+        (x..y).filter(|&k| self.voicing[k] > 0.5).count() as f64 / (y - x).max(1) as f64
+    }
+}
+
+/// Finnish /r/ is a run of brief, light, voiced tip contacts: a tap between vowels, a trill of
+/// two word-initially and before a consonant, three or more when long. The generic trill merged
+/// its contacts into one closure: /r/ came out as silence and a click, and in "perkele" the /k/
+/// closure squeezed the air trapped behind the tip into a pop 1.5 dB below the vowel's level.
+/// Sealed contacts then stopped the voicing (trills voiced for 26–52 % of their length).
+#[test]
+fn finnish_r_is_voiced_contacts_and_does_not_pop() {
+    for (body, f0) in VOICES {
+        for (w, at_least, at_most, voiced) in [("perkele", 2, 3, 0.5), ("ranta", 2, 2, 0.75), ("tarra", 3, 4, 0.9), ("kuori", 1, 1, 0.9), ("kirsikka", 1, 2, 0.8), ("moottoripyörä", 1, 1, 0.9)] {
+            let r = render_fi(w, body, f0);
+            let s = r.seg("r", 0);
+            // contacts: runs of blocks with the tract narrowed to a light contact, inside the /r/
+            let (a, b) = (r.block(s.t0 - 0.005), r.block(s.t1));
+            let (mut contacts, mut run, mut sealed, mut longest_seal) = (0, 0, 0, 0);
+            for k in a..b {
+                if r.area[k] < 0.045 {
+                    run += 1;
+                    if run == 1 {
+                        contacts += 1;
+                    }
+                } else {
+                    run = 0;
+                }
+                sealed = if r.area[k] < 0.005 { sealed + 1 } else { 0 };
+                longest_seal = longest_seal.max(sealed);
+            }
+            assert!((at_least..=at_most).contains(&contacts), "{body} {w}: {contacts} contacts");
+            let v = r.voiced(s.t0, s.t1);
+            assert!(v >= voiced, "{body} {w}: the /r/ is voiced for {:.0} % of its length", v * 100.0);
+            // a contact never becomes a stop closure (before /s/ it used to: "kirtsikka")
+            if w != "perkele" {
+                assert!((longest_seal as f64) * BLOCK < 0.012, "{body} {w}: the /r/ seals for {:.0} ms", longest_seal as f64 * BLOCK * 1000.0);
+            }
+            // each contact dips the level well below the open phases
+            let db = r.frames_db(s.t0, s.t1);
+            let (lo, hi) = db.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), &x| (l.min(x), h.max(x)));
+            assert!(hi - lo > 8.0, "{body} {w}: the /r/ level only varies {:.1} dB", hi - lo);
+        }
+        // no pop: the /k/ closure of "perkele" stays quiet. The pop was -1.5 dB (re the loudest
+        // vowel); the seal itself leaves a small transient (-17 to -22 dB here, -26 dB in "ata")
+        let r = render_fi("perkele", body, f0);
+        let k = r.seg("k", 0);
+        let worst = r.frames_db(k.t0, k.t1 - 0.01).into_iter().fold(f64::NEG_INFINITY, f64::max);
+        assert!(worst < -12.0, "{body} perkele: {worst:.1} dB inside the /k/ closure");
+    }
+}
+
+/// Finnish /p t k/ are unaspirated: voicing starts 9–25 ms after the release (Suomi 1980: VOT
+/// 9/11/20 ms word-initially, 11/16/25 ms medially). With the English glottal timing it took
+/// 22–29 ms, an aspirated [tʰ] that ate the short vowel after it.
+#[test]
+fn finnish_stops_have_short_vot() {
+    for (body, f0) in VOICES {
+        for (w, c, lo, hi) in [("pata", "p", 0.0, 0.016), ("pata", "t", 0.006, 0.022), ("tikka", "t", 0.006, 0.022), ("kukka", "k", 0.012, 0.032), ("satama", "t", 0.006, 0.022)] {
+            let r = render_fi(w, body, f0);
+            let s = r.seg(c, 0);
+            let mid = r.block((s.t0 + s.t1) / 2.0);
+            let rel = (mid..r.area.len()).find(|&k| r.area[k] > 0.02).unwrap();
+            let on = (rel..r.voicing.len()).find(|&k| r.voicing[k] > 0.5).unwrap();
+            let vot = (on - rel) as f64 * BLOCK;
+            assert!((lo..=hi).contains(&vot), "{body} {w} /{c}/: VOT {:.0} ms", vot * 1000.0);
+        }
+    }
+}
+
+/// Short Finnish vowels between voiceless consonants keep their voicing: the /s/ glottal
+/// opening started 45 ms early and the /kk/ dorsum approached 54 ms ahead ("kissa" /i/ voiced
+/// for 24 of 70 ms, "kukka" /u/ for 31 %), and after /s/ the /t/ of "satama" sealed 30 ms early
+/// with the tip still high, leaving ~10 ms of open /a/.
+#[test]
+fn finnish_short_vowels_keep_their_voicing() {
+    for (body, f0) in VOICES {
+        for (w, v, min) in [("kissa", "i", 0.5), ("kukka", "u", 0.5), ("satama", "ɑ", 0.6), ("sitten", "i", 0.5), ("moottoripyörä", "o", 0.6)] {
+            let r = render_fi(w, body, f0);
+            let s = if w == "moottoripyörä" { r.seg(v, 1) } else { r.seg(v, 0) };
+            let f = r.voiced(s.t0, s.t1);
+            assert!(f >= min, "{body} {w} /{v}/: voiced {:.0} % of its length", f * 100.0);
+        }
+        // the /t/ after s·a / s·i seals on time, not inside the vowel
+        for w in ["satama", "sitten"] {
+            let r = render_fi(w, body, f0);
+            let t = r.seg("t", 0);
+            let seal = (r.block(t.t0 - 0.04)..r.block(t.t1)).find(|&k| r.area[k] < 0.005).unwrap() as f64 * BLOCK;
+            assert!((seal - t.t0).abs() < 0.015, "{body} {w}: /t/ seals {:+.0} ms from its start", (seal - t.t0) * 1000.0);
+        }
+    }
+}
+
+/// Finnish /s/ has its constriction from the start, voiceless, and no breathy [h] ahead of it:
+/// the constriction used to form over the whole segment (0.30 cm² at its start, 0.14 at its end;
+/// 2.1× its narrowest at 20 %, now at most 1.3×) behind an open glottis, so a word began
+/// "h-saatana".
+#[test]
+fn finnish_s_forms_at_its_onset() {
+    for (body, f0) in VOICES {
+        for w in ["saatana", "kissa", "lasi"] {
+            let r = render_fi(w, body, f0);
+            let s = r.seg("s", 0);
+            let d = s.t1 - s.t0;
+            let at = |f: f64| r.area[r.block(s.t0 + f * d)];
+            let narrowest = (r.block(s.t0)..r.block(s.t1)).map(|k| r.area[k]).fold(f64::INFINITY, f64::min);
+            assert!(at(0.2) < 1.35 * narrowest, "{body} {w}: /s/ at 20 % is {:.3} cm², narrowest {narrowest:.3}", at(0.2));
+            assert!(r.voiced(s.t0 + 0.2 * d, s.t1 - 0.2 * d) < 0.05, "{body} {w}: /s/ is voiced");
+        }
+        // "saatana": what comes before the /s/ is the /s/ starting, not a wide-open [h]
+        let r = render_fi("saatana", body, f0);
+        let s = r.seg("s", 0);
+        let pre = (r.block(s.t0 - 0.03)..r.block(s.t0)).filter(|&k| r.rms(k as f64 * BLOCK, (k + 1) as f64 * BLOCK) > 0.1 * r.rms(s.t0, s.t1)).all(|k| r.area[k] < 0.3);
+        assert!(pre, "{body} saatana: noise before the /s/ through an open tract");
+    }
+}

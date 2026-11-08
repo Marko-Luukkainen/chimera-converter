@@ -321,7 +321,14 @@ pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
         let Some(def) = s.def.as_ref() else { continue };
         let next_vowel = i < segs.len() - 1 && segs[i + 1].vowel.is_some();
         let prev_seg = if i > 0 { Some(&segs[i - 1]) } else { None };
-        let mut add_oral = |tg: &ArticPatch, a: f64, b: f64, speed: f64, label: &str| oral_gestures_into(def, tg, a, b, speed, label, &mut gestures);
+        // Finnish: a consonant after a short vowel approaches in proportion to the vowel's length
+        // (and after /r/, whose voiced contacts the dorsum's approach would otherwise smother:
+        // in "perkele" the /k/ narrowed the tract under the trill and devoiced two thirds of it)
+        let ramp_scale = match prev_seg {
+            Some(p) if finnish && (p.vowel.is_some() || p.def.is_some_and(|d| d.manner == Manner::Trill)) => js_min(1.0, js_max(FI_RAMP_MIN, (times[i - 1].t1 - times[i - 1].t0) / FI_RAMP_FULL_VOWEL)),
+            _ => 1.0,
+        };
+        let mut add_oral = |tg: &ArticPatch, a: f64, b: f64, speed: f64, label: &str| oral_gestures_ramped(def, tg, a, b, speed, label, ramp_scale, &mut gestures);
         match def.manner {
             // a stop that closes behind another stop's closure, its articulator already placed by
             // the segment before that (the tip raised for /ɹ/ in "sharp tree"), reaches contact
@@ -330,8 +337,25 @@ pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
             // The delay leaves the closure 30 ms before its release (its 10 ms minimum hold and
             // its ~20 ms early release), so a short sung stop isn't pushed past its own end.
             Manner::Stop if pre_placed_behind_closure(&segs, i) => add_oral(&def.targets, t0 + js_min(PLACED_CLOSURE_DELAY, js_max(0.0, dur - 0.03)), t1, 1.55, def.ipa),
+            // Finnish: the articulator is still near from the consonant before a short vowel
+            Manner::Stop | Manner::Nasal if finnish && fi_preplaced(&segs, &times, i) => {
+                // a close vowel leaves the articulator nearer: the jaw opens less beneath it
+                let jaw = segs[i - 1].vowel.as_ref().and_then(|v| v.get(ArticKey::Jaw)).unwrap_or(1.0);
+                let d = js_min(FI_PRESET_DELAY * js_min(1.0, js_max(0.0, (FI_PRESET_OPEN_JAW - jaw) / (FI_PRESET_OPEN_JAW - 0.4))), js_max(0.0, dur - 0.03));
+                add_oral(&def.targets, t0 + d, t1, 1.55, def.ipa)
+            }
             Manner::Stop | Manner::Nasal => add_oral(&def.targets, t0, t1, 1.55, def.ipa),
             Manner::Tap => add_oral(&def.targets, t0, t1, 2.8, def.ipa),
+            Manner::Trill if finnish => {
+                // the open time a following consonant needs before it starts forming: a fricative
+                // forms its constriction FI_FRIC_ORAL_LEAD early, so it needs more
+                let tail = match segs.get(i + 1).and_then(|n| n.def) {
+                    Some(n) if n.manner == Manner::Fricative => FI_R_TAIL + FI_FRIC_ORAL_LEAD,
+                    Some(_) => FI_R_TAIL,
+                    None => 0.0,
+                };
+                finnish_r_gestures(def, t0, t1, tail, &mut gestures)
+            }
             Manner::Trill => {
                 // driven trill: rapid alternation of near-closure and release at ~26 Hz
                 let n = js_max(2.0, js_round(dur * 26.0));
@@ -350,6 +374,9 @@ pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
                     add_oral(&rel.targets, split + 0.008, t1, 1.4, def.ipa);
                 }
             }
+            // Finnish fricatives form their constriction before the segment starts and let it go
+            // just before its end
+            Manner::Fricative if finnish => add_oral(&def.targets, t0 - FI_FRIC_ORAL_LEAD, t1 - FI_FRIC_RELEASE_LEAD, FI_FRIC_SPEED, def.ipa),
             Manner::Fricative | Manner::Approximant | Manner::Lateral => add_oral(&def.targets, t0, t1, 1.3, def.ipa),
             Manner::Glottal | Manner::Vowel => {}
         }
@@ -366,6 +393,13 @@ pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
             gestures.push(Gesture::new(t0, t1, 0.03, 0.03, 5.0, one(ControlKey::ABDUCTION, 0.1 * k2)).label("ɦ"));
         } else if def.glottal == Some(Glottal::Stop) {
             gestures.push(Gesture::new(t0, t1, 0.012, 0.015, 8.0, one(ControlKey::CLOSURE, 1.0)).label("ʔ"));
+        } else if def.voicing == Voicing::Voiceless && finnish && def.manner == Manner::Stop {
+            // the glottis closes again by the release, so voicing starts 10–25 ms after it
+            gestures.push(Gesture::new(t0 + 0.25 * dur, t1 - fi_stop_glottal_end(def.place), 0.035, FI_STOP_GLOTTAL_RAMP, 6.0, one(ControlKey::ABDUCTION, FI_STOP_ABDUCTION)).label("aspiration"));
+        } else if def.voicing == Voicing::Voiceless && finnish {
+            // the glottis opens with the fricative and closes before its end, so a short vowel on
+            // either side keeps its voicing
+            gestures.push(Gesture::new(t0 - FI_FRIC_GLOTTAL_LEAD, t1 - FI_FRIC_GLOTTAL_END, 0.02, 0.02, 6.0, one(ControlKey::ABDUCTION, 0.3)).label("voiceless"));
         } else if def.voicing == Voicing::Voiceless {
             if def.manner == Manner::Stop || def.manner == Manner::Affricate {
                 // aspirated when syllable-initial before a vowel and not after /s/ (English-like);
@@ -466,6 +500,106 @@ pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
     Plan { gestures, segments: planned, end }
 }
 
+/// Finnish voiceless stops: when the glottal opening ends before the release (s), and how fast
+/// it closes. Finnish /p t k/ are unaspirated with a weak burst: VOT word-initially 9 / 11 /
+/// 20 ms, medially 11 / 16 / 25 ms (Suomi 1980, in Suomi et al. 2008 §3.2).
+fn fi_stop_glottal_end(place: &str) -> f64 {
+    match place {
+        "bilabial" => 0.012,
+        "velar" => 0.0,
+        _ => 0.008,
+    }
+}
+const FI_STOP_GLOTTAL_RAMP: f64 = 0.015;
+const FI_STOP_ABDUCTION: f64 = 0.22;
+/// Finnish voiceless fricatives: the glottal opening starts this long before the segment and
+/// ends this long before its end (s), so a short vowel next to /s/ keeps its voicing.
+const FI_FRIC_GLOTTAL_LEAD: f64 = 0.0;
+const FI_FRIC_GLOTTAL_END: f64 = 0.012;
+/// Finnish fricatives: the constriction gesture starts this much earlier (s) and moves at this
+/// speed, so the constriction has formed when the segment starts.
+const FI_FRIC_ORAL_LEAD: f64 = 0.03;
+const FI_FRIC_SPEED: f64 = 2.0;
+
+/// Finnish fricatives let go of their constriction this long before their end (s): the release
+/// ran 16 ms into a following short vowel ("satama").
+const FI_FRIC_RELEASE_LEAD: f64 = 0.01;
+/// How much later a Finnish closure is aimed when its articulator is still near from the
+/// consonant before a short vowel (s): in "satama" the /t/ sealed 30 ms early, leaving the /a/
+/// open for ~10 ms and voicing into the closure.
+const FI_PRESET_DELAY: f64 = 0.025;
+/// The jaw opening (template cm) at which a vowel lets the articulator drop fully, so the delay
+/// is zero; it grows to FI_PRESET_DELAY at a close vowel's jaw (0.4).
+const FI_PRESET_OPEN_JAW: f64 = 1.8;
+/// A vowel shorter than this (s) leaves a consonant's articulator near for the next one.
+const FI_PRESET_VOWEL: f64 = 0.12;
+
+/// Whether consonant `i` comes after a short vowel whose preceding consonant used the same
+/// articulators (s·a·t, t·i·t, n·a·t: the tip has not dropped far in 60–90 ms).
+fn fi_preplaced(segs: &[Seg], times: &[Span], i: usize) -> bool {
+    if i < 2 || segs[i - 1].vowel.is_none() || times[i - 1].t1 - times[i - 1].t0 >= FI_PRESET_VOWEL {
+        return false;
+    }
+    let (Some(def), Some(prev)) = (segs[i].def.as_ref(), segs[i - 2].def.as_ref()) else { return false };
+    def.dominant.iter().any(|k| prev.dominant.contains(k))
+}
+
+/// A consonant after a vowel shorter than this (s) approaches with a proportionally shorter
+/// ramp, down to FI_RAMP_MIN of the usual one.
+const FI_RAMP_FULL_VOWEL: f64 = 0.12;
+const FI_RAMP_MIN: f64 = 0.4;
+
+/// One contact period of the Finnish /r/ (s): ~29 Hz, inside the 25–35 Hz of measured trills.
+pub const FI_R_PERIOD: f64 = 0.034;
+/// The tip during the open phases: raised toward the ridge, short of contact.
+const FI_R_OPEN_Y: f64 = 9.2;
+/// The tip's contact target: a light touch that narrows the tract to ~0.02–0.03 cm² without
+/// sealing it. Sealed contacts (target 10.5) stopped the voicing within a contact, and it did
+/// not restart in the open phase: the trills were voiced for 26–52 % of their length, against
+/// 85–100 % with light contacts, whose amplitude dips (20–30 dB) still mark each contact.
+const FI_R_CLOSE_Y: f64 = 9.4;
+/// How long each contact gesture is held (s), and how far ahead of the contact centre it starts.
+const FI_R_CONTACT: f64 = 0.012;
+const FI_R_LEAD: f64 = 0.015;
+/// Tip speed during the /r/: a trill's contacts are aerodynamically driven, far faster than a
+/// voluntary tip movement.
+const FI_R_SPEED: f64 = 6.0;
+/// Open time kept after the last contact when a consonant follows (s). With 18 ms, the second
+/// contact of "perkele" fell into a tract the /k/ was already narrowing: the voicing stopped
+/// and the release came out as a loud voiceless [h] ("perhkele"); with 40 ms the /r/ before a
+/// voiceless stop is one contact and a voiced release, voiced for 70 % of its length.
+const FI_R_TAIL: f64 = 0.04;
+/// How early the tip starts rising toward the ridge before the /r/ (s).
+const FI_R_RAISE: f64 = 0.025;
+
+/// Finnish /r/: brief, light, voiced alveolar contacts, one per [`FI_R_PERIOD`] of the segment
+/// (a tap when it is short, a trill of two or more contacts when long), with the tip pulled back
+/// to an open position between contacts and after the last, so the voicing carries on through
+/// the /r/ and a following closure (/rk/, /rt/) never seals behind a tip still in contact.
+/// The generic trill held its contact gestures with 30 ms ramps, so its contacts merged into
+/// one long closure: /r/ came out as silence with a click, and in "perkele" the /k/ closure
+/// squeezed the air trapped behind the tip into a pop.
+fn finnish_r_gestures(def: &PhonemeDef, t0: f64, t1: f64, tail: f64, out: &mut Vec<Gesture>) {
+    let dur = t1 - t0;
+    // before a consonant the contacts keep clear of its approach (`tail` of open time), so the
+    // tip has let go and the voicing resumed before the next constriction forms; a span too
+    // short for the contacts at a trill's rate gets fewer of them ("kirsikka": one before /s/)
+    let span = if tail > 0.0 { js_max(0.5 * dur, dur - tail) } else { dur };
+    let n = js_max(1.0, js_min(js_round(dur / FI_R_PERIOD), js_round(span / (0.7 * FI_R_PERIOD))));
+    let period = span / n;
+    let tip = |y: f64| Targets::default().with(ArticKey::TtX, 6.25).with(ArticKey::TtY, y);
+    // the tip rises toward the ridge during the end of the vowel before, as speakers anticipate a
+    // trill; from the vowel's resting tip the first contact fell short (0.05 cm², no seal)
+    let open_end = if tail > 0.0 { t0 + span } else { t1 };
+    out.push(Gesture::new(t0 - FI_R_RAISE, open_end, FI_R_RAISE, 0.015, 8.0, tip(FI_R_OPEN_Y)).speed(FI_R_SPEED).label(def.ipa));
+    let mut k = 0.0;
+    while k < n {
+        let c = t0 + (k + 0.5) * period;
+        out.push(Gesture::new(c - FI_R_LEAD, c - FI_R_LEAD + FI_R_CONTACT, 0.004, 0.004, 40.0, tip(FI_R_CLOSE_Y)).speed(FI_R_SPEED).label(def.ipa));
+        k += 1.0;
+    }
+}
+
 /// Front-to-back order of the oral places of articulation.
 fn place_rank(place: &str) -> Option<u8> {
     Some(match place {
@@ -525,6 +659,15 @@ pub fn oral_gestures(def: &PhonemeDef, tg: &ArticPatch, a: f64, b: f64, speed: f
 /// [`oral_gestures`], appended to `out` (at most four gestures; no allocation when `out` has
 /// room for them).
 pub fn oral_gestures_into(def: &PhonemeDef, tg: &ArticPatch, a: f64, b: f64, speed: f64, label: &str, out: &mut Vec<Gesture>) {
+    oral_gestures_ramped(def, tg, a, b, speed, label, 1.0, out)
+}
+
+/// [`oral_gestures_into`] with the dominant gesture's ramp-in scaled by `ramp_scale` (1 for the
+/// usual approach). A Finnish short vowel (60–80 ms) between two consonants left no time for the
+/// usual 30 ms approach plus latency lead: in "kukka" the /kk/ closure began forming 40 ms
+/// before its planned start, and the /u/ was voiced for under a third of its length.
+#[allow(clippy::too_many_arguments)]
+fn oral_gestures_ramped(def: &PhonemeDef, tg: &ArticPatch, a: f64, b: f64, speed: f64, label: &str, ramp_scale: f64, out: &mut Vec<Gesture>) {
     let mut dom = ArticPatch::default();
     let mut sec = ArticPatch::default();
     for (k, v) in tg.iter() {
@@ -548,7 +691,10 @@ pub fn oral_gestures_into(def: &PhonemeDef, tg: &ArticPatch, a: f64, b: f64, spe
     // the overlapping vowel contributes ~2 %, so closures seal instead of being diluted
     let early = if closing { if body_only { 0.024 } else if lips_only { 0.022 } else { 0.031 } } else { 0.008 };
     if !dom.is_empty() {
-        out.push(Gesture::new(a - early, js_max(a + 0.01, b - lead), 0.03, if body_only { 0.03 } else { 0.018 }, 40.0, artic_targets(&dom)).speed(sp).release_hold(0.045).label(label));
+        // only the heavy dorsum's approach is shortened: a tip or lip closure with a shorter ramp
+        // sealed ~20 ms late ("ata"), while the dorsum's early approach ate a short vowel
+        let ramp_in = if body_only { 0.03 * ramp_scale } else { 0.03 };
+        out.push(Gesture::new(a - early, js_max(a + 0.01, b - lead), ramp_in, if body_only { 0.03 } else { 0.018 }, 40.0, artic_targets(&dom)).speed(sp).release_hold(0.045).label(label));
     }
     // alveolars front the tongue body during the closure (the alveolar F2 locus, ~1.8 kHz)
     let alveolar = def.place == "alveolar" && tg.get(ArticKey::TbX).is_none() && matches!(def.manner, Manner::Stop | Manner::Nasal | Manner::Fricative | Manner::Affricate | Manner::Tap);

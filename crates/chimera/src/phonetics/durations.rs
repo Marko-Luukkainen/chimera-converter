@@ -242,6 +242,13 @@ const FI_LONG_VOWEL_UNSTRESSED: f64 = 1.9;
 /// A geminate stop's closure is ~2.3× the singleton's; geminate sonorants and fricatives ~1.9×.
 pub const FI_GEMINATE_STOP: f64 = 2.3;
 const FI_GEMINATE_OTHER: f64 = 1.9;
+/// Finnish /r/ durations (ms). Word-medial single /r/ between vowels is mostly a tap (75 % and
+/// 90 % in two corpora, Mustanoja & O'Dell 2007, in Suomi et al. 2008 §3.2); word-initially a
+/// trill is more common; /rr/ is always a trill, "often with several closure periods" (ibid.).
+/// Trills in other languages run 2–5 contacts (median 3) at roughly 25–35 Hz.
+const FI_R_TAP: f64 = 30.0;
+const FI_R_TRILL: f64 = 66.0;
+const FI_R_GEMINATE: f64 = 102.0;
 /// A diphthong takes about the time of a long vowel.
 const FI_DIPHTHONG: f64 = 2.0;
 /// The vowel of a second syllable after a light (CV) first syllable is half-long: "kala" has a
@@ -322,6 +329,21 @@ pub fn finnish_durations(segs: &[Segment], info: impl Fn(&Segment) -> SegInfo) -
                 return d / 1000.0;
             }
             // consonants
+            if s.ipa == "r" {
+                // /r/ is timed by the contacts it makes (the planner gives one per FI_R_PERIOD): a
+                // single-contact tap between vowels inside a word, a two-contact trill word-
+                // initially, next to a consonant and word-finally, several contacts when long
+                let prev_v = i > 0 && inf[i - 1].vowel && word[i - 1] == word[i];
+                let next_v = i + 1 < n && inf[i + 1].vowel && word[i + 1] == word[i];
+                let ms = if long(i) {
+                    FI_R_GEMINATE
+                } else if prev_v && next_v {
+                    FI_R_TAP
+                } else {
+                    FI_R_TRILL
+                };
+                return ms / 1000.0;
+            }
             if long(i) {
                 d *= if inf[i].manner == Some(Manner::Stop) { FI_GEMINATE_STOP } else { FI_GEMINATE_OTHER };
             }
