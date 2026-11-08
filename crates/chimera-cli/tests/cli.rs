@@ -81,6 +81,9 @@ fn calibrate_consonants_reproduces_the_committed_table() {
     let got = std::fs::read_to_string(&out).unwrap();
     let want =
         std::fs::read_to_string(format!("{PHONETICS}/consonantTargets.generated.json")).unwrap();
+    // Git for Windows checks text out with CRLF (core.autocrlf=true) while the calibration writes
+    // LF: compare the content, not the line endings
+    let (got, want) = (got.replace("\r\n", "\n"), want.replace("\r\n", "\n"));
     assert!(
         got == want,
         "calibrate consonants differs from the committed table"
