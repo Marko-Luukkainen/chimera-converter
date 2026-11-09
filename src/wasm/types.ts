@@ -45,12 +45,14 @@ export interface HumanArtic {
 }
 
 /**
- * A body between the three calibrated ones (mirrors the engine's BodyMix): `female` from the adult
- * male (0) to the adult female (1), `child` from adult (0) to child (1).
+ * A body between the presets (mirrors the engine's BodyMix): `female` from the adult male (0) to
+ * the adult female (1), `child` from adult (0) to child (1), and `neanderthal` from a modern human
+ * (0) to the Neanderthal (1; left out for a modern body, as the engine serializes it).
  */
 export interface BodyMix {
   female: number;
   child: number;
+  neanderthal?: number;
 }
 
 export interface HumanBody {

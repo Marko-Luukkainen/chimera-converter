@@ -16,7 +16,7 @@ import { planSong, planNoteOn, planNoteOff, planMelisma } from "../wasm/engine.t
 import { EXHALE_LABEL } from "../wasm/engine.ts";
 import { DEMO_SONGS } from "../wasm/engine.ts";
 import type { Gesture, SungNote } from "../wasm/types.ts";
-import { nearestBody, type BodyMix } from "./body.ts";
+import { calibrated, nearestBody, type BodyMix } from "./body.ts";
 
 /** A note on the piano roll, on the voice clock (s); t1 is null while it is held. */
 export interface RollNote {
@@ -286,7 +286,7 @@ export async function playDemo(name: string, body: BodyMix, ready?: () => Promis
   if (token !== demoToken) return;
   const syl = syllablesOf(song.lyrics, lang);
   if (!syl.length) return;
-  const shift = song.octave[nearestBody(body)] * 12;
+  const shift = song.octave[calibrated(nearestBody(body))] * 12;
   const notes = song.notes.map((n, i) => ({ midi: n[0] + shift, beats: n[1], syl: syl[i % syl.length] }));
   const t0 = 0.35;
   const plan = planSong(notes, { body, bpm: song.bpm, t0, vibrato: useSing.getState().vibrato, language: languageOf(lang) });

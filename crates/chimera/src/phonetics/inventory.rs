@@ -245,7 +245,7 @@ fn by_ipa(ipa: &str) -> Option<&'static PhonemeDef> {
 /// is `Copy`).
 pub fn phoneme(ipa: &str, body: BodyMix) -> Option<PhonemeDef> {
     let p = by_ipa(ipa)?;
-    let of = |b: BodyName| match CAL.get(b.as_str()).and_then(|t| t.get(ipa)) {
+    let of = |b: BodyName| match CAL.get(b.cal_name()).and_then(|t| t.get(ipa)) {
         Some(cal) => {
             let mut t = p.targets;
             t.merge(cal);

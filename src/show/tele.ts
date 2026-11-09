@@ -4,15 +4,16 @@
  *
  * File layout (little-endian; crates/chimera-cli/src/render.rs `TeleRecorder`): "CHTL", u32
  * version, sampleRate, hop, frames, frameLen, nArtic, nPh, nOr, nScope, f32 bodyFemale,
- * bodyChild; then `frames` × `frameLen` f32. A frame: phLen, orLen, velumPort, f0, voicing, pLung,
+ * bodyChild, and from version 2 bodyNeanderthal; then `frames` × `frameLen` f32. A frame: phLen, orLen, velumPort, f0, voicing, pLung,
  * outRms, noiseLevel, noiseNode, gate, clock, then artic, phAreas, orAreas, pressureRms, flow,
  * glottalArea, glottalFlow. Frame i is the state at sample i·hop.
  */
 import type { TelemetryMessage } from "../worklet/protocol.ts";
 import type { BodyMix } from "../wasm/types.ts";
 
-export const TELE_VERSION = 1;
-const HEADER_BYTES = 48;
+/** the newest version this app reads (version 1, without the Neanderthal axis, reads too) */
+export const TELE_VERSION = 2;
+const headerBytes = (version: number) => (version >= 2 ? 52 : 48);
 const SCALARS = 11;
 
 export class TeleTrack {
@@ -28,13 +29,15 @@ export class TeleTrack {
   private readonly data: Float32Array;
 
   constructor(buf: ArrayBuffer) {
-    if (buf.byteLength < HEADER_BYTES) throw new Error("telemetry file is too short for its header");
+    if (buf.byteLength < 48) throw new Error("telemetry file is too short for its header");
     const magic = new TextDecoder().decode(new Uint8Array(buf, 0, 4));
     if (magic !== "CHTL") throw new Error("not a CHIMERA telemetry file");
     const u = new DataView(buf);
     const at = (i: number) => u.getUint32(4 + 4 * i, true);
     const version = at(0);
-    if (version !== TELE_VERSION) throw new Error(`telemetry file version ${version}; this app reads ${TELE_VERSION}`);
+    if (version !== 1 && version !== TELE_VERSION) throw new Error(`telemetry file version ${version}; this app reads 1 and ${TELE_VERSION}`);
+    const header = headerBytes(version);
+    if (buf.byteLength < header) throw new Error("telemetry file is too short for its header");
     this.sampleRate = at(1);
     this.hop = at(2);
     this.frames = at(3);
@@ -43,12 +46,14 @@ export class TeleTrack {
     this.nPh = at(6);
     this.nOr = at(7);
     this.nScope = at(8);
-    this.body = { female: u.getFloat32(40, true), child: u.getFloat32(44, true) };
+    const neanderthal = version >= 2 ? u.getFloat32(48, true) : 0;
+    // a modern body keeps the two-axis shape it always had
+    this.body = neanderthal > 0 ? { female: u.getFloat32(40, true), child: u.getFloat32(44, true), neanderthal } : { female: u.getFloat32(40, true), child: u.getFloat32(44, true) };
     const want = SCALARS + this.nArtic + 3 * (this.nPh + this.nOr) + 2 * this.nScope;
     if (this.len !== want || this.frames < 1 || this.hop < 1 || this.sampleRate < 1) throw new Error("telemetry file header is inconsistent");
-    if (buf.byteLength !== HEADER_BYTES + 4 * this.frames * this.len)
-      throw new Error(`telemetry file is ${buf.byteLength} bytes; its header says ${HEADER_BYTES + 4 * this.frames * this.len}`);
-    this.data = new Float32Array(buf, HEADER_BYTES, this.frames * this.len);
+    if (buf.byteLength !== header + 4 * this.frames * this.len)
+      throw new Error(`telemetry file is ${buf.byteLength} bytes; its header says ${header + 4 * this.frames * this.len}`);
+    this.data = new Float32Array(buf, header, this.frames * this.len);
   }
 
   /** frames per second */

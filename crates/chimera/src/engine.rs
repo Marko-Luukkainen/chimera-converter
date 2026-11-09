@@ -29,6 +29,8 @@ pub fn default_f0(body: impl Into<BodyMix>) -> f64 {
         BodyName::Male => 110.0,
         BodyName::Female => 205.0,
         BodyName::Child => 260.0,
+        // no evidence either way: a little below the modern man's, for the larger larynx
+        BodyName::Neanderthal => 100.0,
     };
     match body.preset() {
         Some(b) => f(b),
@@ -87,7 +89,7 @@ impl Engine {
     /// new body's default), posture, breath. Allocates (a new airway network).
     pub fn set_body(&mut self, body: impl Into<BodyMix>) -> VoiceInfo {
         let body: BodyMix = body.into();
-        let body = BodyMix::new(body.female, body.child);
+        let body = body.clamped();
         let prev = core::mem::replace(&mut self.voice, Self::make_voice(self.sample_rate, body));
         self.body = body;
         let mut src = SourcePatch::from_source(&prev.source);

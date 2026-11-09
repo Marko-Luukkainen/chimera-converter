@@ -425,15 +425,15 @@ fn render_notes_tele_records_the_live_telemetry_without_changing_the_sound() {
     let u = |i: usize| u32::from_le_bytes(t[4 + 4 * i..8 + 4 * i].try_into().unwrap()) as usize;
     let f = |o: usize| f32::from_le_bytes(t[o..o + 4].try_into().unwrap());
     let (version, rate, hop, frames, len, n_artic, n_ph, n_or, n_scope) = (u(0), u(1), u(2), u(3), u(4), u(5), u(6), u(7), u(8));
-    assert_eq!((version, rate, hop, n_artic, n_scope), (1, 48000, 768, 17, 32));
-    assert_eq!((f(40), f(44)), (1.0, 0.0), "body mix: female");
+    assert_eq!((version, rate, hop, n_artic, n_scope), (2, 48000, 768, 17, 32));
+    assert_eq!((f(40), f(44), f(48)), (1.0, 0.0, 0.0), "body mix: female");
     // the female airway at 48 kHz, two times oversampled
     assert_eq!((n_ph, n_or), (15, 16));
     assert_eq!(len, 11 + n_artic + 3 * (n_ph + n_or) + 2 * n_scope);
     // frame 0 before any sound, then one per whole hop
     assert_eq!(frames, 1 + samples / hop, "{stdout}");
-    assert_eq!(t.len(), 48 + 4 * frames * len);
-    let at = |i: usize, k: usize| f(48 + 4 * (i * len + k));
+    assert_eq!(t.len(), 52 + 4 * frames * len);
+    let at = |i: usize, k: usize| f(52 + 4 * (i * len + k));
     // the clock (field 10) is the frame's time
     for i in [0, 1, frames / 2, frames - 1] {
         assert!((at(i, 10) as f64 - (i * hop) as f64 / 48000.0).abs() < 1e-4, "frame {i} clock {}", at(i, 10));

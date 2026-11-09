@@ -100,7 +100,7 @@ pub fn diphthong_parts(ipa: &str) -> Option<(&'static str, &'static str)> {
 
 pub fn is_vowel(ipa: &str, body: BodyMix) -> bool {
     let t = vowel_table();
-    body.weights().iter().any(|(b, w)| *w > 0.0 && t.get(b.as_str()).is_some_and(|t| t.contains_key(ipa))) || expand(ipa).is_some()
+    body.weights().iter().any(|(b, w)| *w > 0.0 && t.get(b.cal_name()).is_some_and(|t| t.contains_key(ipa))) || expand(ipa).is_some()
 }
 
 /// The calibrated articulation of a vowel for a body: between presets, the presets' calibrated
@@ -125,7 +125,7 @@ fn table_vowel_artic(t: &VowelTable, ipa: &str, body: BodyMix) -> Option<ArticPa
         return preset_vowel_artic(t, ipa, b);
     }
     let w = body.weights();
-    let mut parts = [(0.0, ArticPatch::default()); 3];
+    let mut parts = [(0.0, ArticPatch::default()); 4];
     for (i, (b, wi)) in w.iter().enumerate() {
         if *wi > 0.0 {
             parts[i] = (*wi, preset_vowel_artic(t, ipa, *b)?);
@@ -135,7 +135,7 @@ fn table_vowel_artic(t: &VowelTable, ipa: &str, body: BodyMix) -> Option<ArticPa
 }
 
 fn preset_vowel_artic(t: &VowelTable, ipa: &str, body: BodyName) -> Option<ArticPatch> {
-    let v = t.get(body.as_str()).and_then(|b| b.get(ipa)).or_else(|| t.get("male").and_then(|m| m.get(ipa)))?;
+    let v = t.get(body.cal_name()).and_then(|b| b.get(ipa)).or_else(|| t.get("male").and_then(|m| m.get(ipa)))?;
     let mut out = ArticPatch::default();
     for k in VOWEL_KEYS {
         if let Some(x) = v.artic.get(k) {

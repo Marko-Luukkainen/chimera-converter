@@ -15,7 +15,7 @@ export type * from "./types.ts";
 
 interface Catalog {
   neutral: HumanArtic;
-  bodies: { male: HumanBody; female: HumanBody; child: HumanBody };
+  bodies: { male: HumanBody; female: HumanBody; child: HumanBody; neanderthal: HumanBody };
   articKeys: ArticKey[];
   articSpecs: Record<ArticKey, ArticSpec>;
   defaultSource: VoiceSource;
@@ -35,6 +35,7 @@ export const NEUTRAL: Readonly<HumanArtic> = CATALOG.neutral;
 export const BODY_MALE: HumanBody = CATALOG.bodies.male;
 export const BODY_FEMALE: HumanBody = CATALOG.bodies.female;
 export const BODY_CHILD: HumanBody = CATALOG.bodies.child;
+export const BODY_NEANDERTHAL: HumanBody = CATALOG.bodies.neanderthal;
 export const ARTIC_KEYS: readonly ArticKey[] = CATALOG.articKeys;
 export const ARTIC_SPECS: Readonly<Record<ArticKey, ArticSpec>> = CATALOG.articSpecs;
 export const DEFAULT_SOURCE: Readonly<VoiceSource> = CATALOG.defaultSource;

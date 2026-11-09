@@ -50,7 +50,8 @@ for tests and the `chimera` CLI.
 - **Bestiary**: songbird (two-voice syrinx), seal, alligator and elephant.
 - **Duet** (`?show=<id>`): two 3D heads replay a pre-rendered song.
 
-Male, female and child bodies blend continuously. Everything on screen animates from live
+Male, female and child bodies blend continuously, and a Neanderthal body stands whole in the 3D view
+(the adult male's gestures on a Neanderthal's anatomy). Everything on screen animates from live
 engine state: pressure in the airway, airflow, the vocal folds, spectra and formants.
 
 ## Run it

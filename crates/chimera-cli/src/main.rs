@@ -10,22 +10,22 @@ mod js;
 mod render;
 mod wav;
 
-use chimera::anatomy::human::{BODY_CHILD, BODY_FEMALE, BODY_MALE, BodyMix, HumanBody};
+use chimera::anatomy::human::{BODY_CHILD, BODY_FEMALE, BODY_MALE, BODY_NEANDERTHAL, BodyMix, HumanBody};
 use std::process::ExitCode;
 
 const USAGE: &str = "\
 usage: chimera <command> [args] [--float]
 
-  render speech  <out> [\"ipa / ipa\"] [male|female|child]
-  render text    <out> [\"English text.\"] [male|female|child]
-  render fi      <out> [\"Suomenkielinen teksti.\"] [male|female|child]
-  render song    [outdir] [male|female|child]
-  render notes   <in.json> <out> [male|female|child] [--artic tracks.json] [--tele voice.tele]
+  render speech  <out> [\"ipa / ipa\"] [male|female|child|neanderthal]
+  render text    <out> [\"English text.\"] [male|female|child|neanderthal]
+  render fi      <out> [\"Suomenkielinen teksti.\"] [male|female|child|neanderthal]
+  render song    [outdir] [male|female|child|neanderthal]
+  render notes   <in.json> <out> [male|female|child|neanderthal] [--artic tracks.json] [--tele voice.tele]
                  (melody file; midi <= 0 is a rest; \"lang\": \"fi\" for Finnish lyrics;
                   --artic also writes the articulators at 100 Hz)
-  render beatbox [outdir] [preset name | pattern] [male|female|child] [bpm] [bars]
+  render beatbox [outdir] [preset name | pattern] [male|female|child|neanderthal] [bpm] [bars]
   render creature [creatureId] [outdir]
-  render vowels  [male|female|child] [out]
+  render vowels  [male|female|child|neanderthal] [out]
   diagnose       [outdir]
   compare csd    [csd-dir] [outdir] [--songs a|b|all|en001a,…] [--body female] [--jobs n]
                  [--against earlier/score.json]  (score.json: distance to the singer, and the verdict)
@@ -55,23 +55,25 @@ impl Ctx {
     }
 }
 
-/// The body for a name (`male`, `female`, `child`).
+/// The body for a name (`male`, `female`, `child`, `neanderthal`).
 pub fn body(name: &str) -> Result<HumanBody, String> {
     match name {
         "male" => Ok(BODY_MALE),
         "female" => Ok(BODY_FEMALE),
         "child" => Ok(BODY_CHILD),
-        _ => Err(format!("unknown body {name:?}; have male, female, child")),
+        "neanderthal" => Ok(BODY_NEANDERTHAL),
+        _ => Err(format!("unknown body {name:?}; have male, female, child, neanderthal")),
     }
 }
 
-/// The app's body mix for a body preset (female 0..1, child 0..1), as `src/ui/body.ts` PRESETS.
+/// The app's body mix for a body preset, as `src/ui/body.ts` PRESETS.
 pub fn body_mix(name: &str) -> Result<BodyMix, String> {
     match name {
-        "male" => Ok(BodyMix::new(0.0, 0.0)),
-        "female" => Ok(BodyMix::new(1.0, 0.0)),
-        "child" => Ok(BodyMix::new(0.0, 1.0)),
-        _ => Err(format!("unknown body {name:?}; have male, female, child")),
+        "male" => Ok(BodyMix::MALE),
+        "female" => Ok(BodyMix::FEMALE),
+        "child" => Ok(BodyMix::CHILD),
+        "neanderthal" => Ok(BodyMix::NEANDERTHAL),
+        _ => Err(format!("unknown body {name:?}; have male, female, child, neanderthal")),
     }
 }
 

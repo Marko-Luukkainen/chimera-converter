@@ -8,6 +8,7 @@ import type { HumanArtic, HumanFrame } from "../../wasm/types.ts";
 import type { Vec } from "./geom.ts";
 import { rotateAbout, dist, catmullRom } from "./geom.ts";
 import type { VoiceModel } from "../analysis.ts";
+import { neanderthalShare } from "../body.ts";
 
 /** the visible part of the head, in body cm */
 export const VIEW = { x0: -7.5, x1: 10.25, y0: -4.55, y1: 19.9 };
@@ -97,13 +98,72 @@ export function bodyPoint(model: VoiceModel): (x: number, y: number) => Vec {
   return (x: number, y: number): Vec => ({ x: x * k, y: (y < 7 ? 7 - (7 - y) * ph : y) * k });
 }
 
+const bump = (u: number) => (Math.abs(u) < 1 ? (1 - u * u) ** 2 : 0);
+const smooth = (a: number, b: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
+/** the braincase above this template height flattens for a Neanderthal (by VAULT at full share) */
+const VAULT_FROM = 15, VAULT = 0.2;
+
+/**
+ * The Neanderthal's head, as a reshaping of the modern template (template cm in and out; the
+ * identity for a modern body, n = 0): a long, low braincase that bulges at the back (the
+ * occipital bun), a continuous brow ridge (the supraorbital torus) with the forehead sloping
+ * back from it, a midface and a big nose jutting forward, and no chin. The airway, palate, teeth
+ * and lips are the engine's and stay as they are.
+ */
+export function neanderthalMorph(n: number): (x: number, y: number) => Vec {
+  if (!(n > 0)) return (x, y) => ({ x, y });
+  return (x, y) => {
+    let X = x;
+    const Y = y > VAULT_FROM ? VAULT_FROM + (y - VAULT_FROM) * (1 - VAULT * n) : y;
+    // the back of the skull reaches further, most of all in the bun behind the ears
+    if (x < -2) X -= n * 0.09 * (-2 - x) * smooth(6, 12, y);
+    X -= 1.1 * n * bump((x + 8.5) / 3) * bump((y - 14.5) / 3.2);
+    if (x > 4) {
+      // the torus over the eyes, and above it a forehead that slopes away
+      X += 1.0 * n * bump((y - 16.6) / 1.1);
+      X -= 1.4 * n * smooth(17.4, 20.5, y) * smooth(4, 6, x);
+    }
+    // midfacial prognathism: the face between the brows and the mouth comes forward, the nose most
+    if (x > 3.5) X += n * smooth(3.5, 6, x) * (0.6 * bump((y - 13) / 3.2) + 0.5 * bump((y - 11.6) / 1.4) * smooth(7.6, 8.8, x));
+    // no chin: the front of the mandible slopes back
+    if (x > 5.5 && y < 6.5) X -= 0.7 * n * smooth(5.5, 7.5, x) * bump((y - 4.3) / 2.2);
+    return { x: X, y: Y };
+  };
+}
+
+/** The modern template height a Neanderthal's (morphed) template height came from (the inverse
+ *  of the vault's flattening; the identity for a modern body). */
+export function neanderthalUnmorphY(n: number): (y: number) => number {
+  if (!(n > 0)) return (y) => y;
+  return (y) => (y > VAULT_FROM ? VAULT_FROM + (y - VAULT_FROM) / (1 - VAULT * n) : y);
+}
+
+/** [`bodyPoint`] of the head's own outlines: reshaped for a Neanderthal ([`neanderthalMorph`]). */
+export function headPoint(model: VoiceModel): (x: number, y: number) => Vec {
+  const B = bodyPoint(model);
+  const m = neanderthalMorph(neanderthalShare(model.body));
+  return (x, y) => {
+    const p = m(x, y);
+    return B(p.x, p.y);
+  };
+}
+
 export function buildProfile(model: VoiceModel, f: HumanFrame, a: HumanArtic): Profile {
   const t = model.tract;
   const P = (x: number, y: number) => t.P(x, y);
-  const J = jawFn(model, a);
+  const Jaw = jawFn(model, a);
   const k = t.scale;
   const lar = a.larynx * k;
-  const B = bodyPoint(model);
+  const B = headPoint(model);
+  const morph = neanderthalMorph(neanderthalShare(model.body));
+  const J = (x: number, y: number) => {
+    const p = morph(x, y);
+    return Jaw(p.x, p.y);
+  };
   const ulOut = f.upperLip.slice(7); // edge → nose
   const llOut = f.lowerLip.slice(7); // edge → chin
   const neckFront = catmullRom([B(2.3, -4.6), B(2.38, -1.5), B(2.52, 0.4), B(3.0, 1.7), J(5.3, 3.0), J(7.25, 3.35), J(7.95, 4.6), J(7.55, 5.7)], 4);
@@ -128,7 +188,7 @@ export function buildProfile(model: VoiceModel, f: HumanFrame, a: HumanArtic): P
     if (y < -4.4) break;
     rings.push([{ x: g.x + 0.8 * k, y }, { x: g.x + 1.05 * k, y: y - 0.05 }, { x: g.x + 1.05 * k, y: y - 0.5 * k }, { x: g.x + 0.82 * k, y: y - 0.45 * k }, { x: g.x + 0.8 * k, y }]);
   }
-  const origin = J(6.0, 5.45);
+  const origin = Jaw(6.0, 5.45);
   const tc = f.tongueCenter;
   const fibres: Vec[][] = [];
   for (let i = 0; i <= 16; i++) {
@@ -173,7 +233,7 @@ export function buildProfile(model: VoiceModel, f: HumanFrame, a: HumanArtic): P
       [{ x: g.x - 0.62 * k, y: g.y + 0.05 }, { x: g.x - 0.1, y: g.y + 0.12 * k }, { x: g.x - 0.62 * k, y: g.y + 0.32 * k }, { x: g.x - 0.62 * k, y: g.y + 0.05 }],
       [{ x: g.x + 0.72 * k, y: g.y + 0.05 }, { x: g.x + 0.12, y: g.y + 0.12 * k }, { x: g.x + 0.72 * k, y: g.y + 0.32 * k }, { x: g.x + 0.72 * k, y: g.y + 0.05 }],
     ],
-    lowerTeeth: [...f.lowerTeeth, J(6.8, 6.0), J(6.4, 6.2), f.lowerTeeth[0]],
+    lowerTeeth: [...f.lowerTeeth, Jaw(6.8, 6.0), Jaw(6.4, 6.2), f.lowerTeeth[0]],
   };
 }
 

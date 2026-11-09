@@ -12,7 +12,7 @@ export interface PhraseMsg {
   pause?: number;
 }
 
-export type BodyName = "male" | "female" | "child";
+export type BodyName = "male" | "female" | "child" | "neanderthal";
 
 export type ToWorklet =
   | { type: "body"; body: BodyMix }

@@ -4,7 +4,7 @@
  * vowel-space interpolation for the vowel map. Never runs inside the audio thread.
  */
 import { airwayModel, dropAirwayModel, airwayFrame, airwayAreas, airwayTransfer, TractMap, NEUTRAL, ARTIC_KEYS, VOWELS, VOWEL_TARGETS, type AirwayModel, type HumanArtic, type HumanBody, type HumanFrame } from "../wasm/engine.ts";
-import { bodyWeights, type BodyMix } from "./body.ts";
+import { bodyWeights, calibrated, type BodyMix } from "./body.ts";
 
 export interface VowelPoint {
   ipa: string;
@@ -37,10 +37,11 @@ export class VoiceModel {
     this.nPh = this.model.nPh;
     this.nOr = this.model.nOr;
     // calibrated vowels of the presets, blended by the body's weights (as the engine plans them;
-    // the formants are a blend too, close to what this body produces)
+    // the formants are a blend too, close to what this body produces; the Neanderthal's are the
+    // adult male's, whose gestures it borrows)
     const parts = bodyWeights(body)
       .filter(([, w]) => w > 0)
-      .map(([n, w]) => ({ w, table: VOWEL_TARGETS[n] ?? {} }));
+      .map(([n, w]) => ({ w, table: VOWEL_TARGETS[calibrated(n)] ?? {} }));
     this.vowels = VOWELS.filter((v) => parts.every((p) => p.table[v.ipa])).map((v) => {
       const at = (f: (t: (typeof parts)[number]["table"][string]) => number | undefined) => {
         let acc = 0, ws = 0;

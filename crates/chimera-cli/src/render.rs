@@ -85,6 +85,7 @@ pub fn speech(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let b = body(body_name)?;
     let f0 = match body_name {
         "female" => 200.0,
+        "neanderthal" => 100.0,
         "child" => 250.0,
         _ => 110.0,
     };
@@ -158,6 +159,7 @@ fn render_phrases(
     let b = body(body_name)?;
     let f0 = match body_name {
         "female" => 205.0,
+        "neanderthal" => 100.0,
         "child" => 250.0,
         _ => 112.0,
     };
@@ -385,13 +387,15 @@ const ARTIC_RATE: usize = 100;
 pub const TELE_HOP: usize = 768;
 /// Points kept of the 256-point glottal scope in a telemetry frame (every 8th).
 pub const TELE_SCOPE: usize = 32;
-/// `--tele` file version (see `TeleRecorder`).
-pub const TELE_VERSION: u32 = 1;
+/// `--tele` file version (see `TeleRecorder`). Version 2 added the Neanderthal axis of the body;
+/// the app reads both.
+pub const TELE_VERSION: u32 = 2;
 
 /// The voice's telemetry over time, for replaying a render in the app (two heads singing a duet).
 ///
 /// File layout, little-endian: `b"CHTL"`, then u32 version, sampleRate, hop, frames, frameLen,
-/// nArtic, nPh, nOr, nScope, then f32 bodyFemale, bodyChild (48 bytes in all); then `frames`
+/// nArtic, nPh, nOr, nScope, then f32 bodyFemale, bodyChild, bodyNeanderthal (52 bytes in all;
+/// version 1 had no bodyNeanderthal, 48 bytes); then `frames`
 /// frames of `frameLen` f32s. A frame is the wasm telemetry block's fields in its order
 /// (crates/chimera-wasm `engine_telemetry`): phLen, orLen, velumPort, f0, voicing, pLung, outRms,
 /// noiseLevel, noiseNode, gate, clock, then artic, phAreas, orAreas, pressureRms (nPh+nOr),
@@ -445,12 +449,12 @@ impl TeleRecorder {
     }
 
     fn bytes(&self, body: BodyMix) -> Vec<u8> {
-        let mut b = Vec::with_capacity(48 + 4 * self.data.len());
+        let mut b = Vec::with_capacity(52 + 4 * self.data.len());
         b.extend_from_slice(b"CHTL");
         for x in [TELE_VERSION, FS as u32, TELE_HOP as u32, self.frames, self.frame_len() as u32, N_ARTIC as u32, self.n_ph as u32, self.n_or as u32, TELE_SCOPE as u32] {
             b.extend_from_slice(&x.to_le_bytes());
         }
-        for x in [body.female as f32, body.child as f32] {
+        for x in [body.female as f32, body.child as f32, body.neanderthal as f32] {
             b.extend_from_slice(&x.to_le_bytes());
         }
         for x in &self.data {
@@ -841,6 +845,7 @@ pub fn vowels(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let name = arg(a, 1, &default_out);
     let f0 = match body_name {
         "female" => 205.0,
+        "neanderthal" => 100.0,
         "child" => 260.0,
         _ => 110.0,
     };

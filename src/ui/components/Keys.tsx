@@ -5,7 +5,7 @@ import { nearestBody, type BodyMix } from "../body.ts";
 
 /** Computer-keyboard layout: two rows like a piano (A W S E D F T G Y H U J K O L P ;). */
 const KEYMAP: Record<string, number> = { a: 0, w: 1, s: 2, e: 3, d: 4, f: 5, t: 6, g: 7, y: 8, h: 9, u: 10, j: 11, k: 12, o: 13, l: 14, p: 15, ";": 16 };
-const BASES: Record<string, number> = { male: 48, female: 57, child: 60 };
+const BASES: Record<string, number> = { male: 48, female: 57, child: 60, neanderthal: 48 };
 /** the lowest key, from the nearest preset body (so the keys stay on whole octaves of C/A) */
 const BASE = (b: BodyMix) => BASES[nearestBody(b)];
 

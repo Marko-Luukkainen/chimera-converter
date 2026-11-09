@@ -147,9 +147,9 @@ export function LiveVoicePanel(props: { showId: string; live: LiveShow }) {
         <div className="voice-body">
           <BodyPad />
           <div className="voice-body-presets" role="group" aria-label="Body">
-            {(["male", "female", "child"] as const).map((b) => (
+            {(["male", "female", "child", "neanderthal"] as const).map((b) => (
               <button key={b} type="button" className="enc-tab" onClick={() => set({ body: PRESETS[b] })}>
-                {b === "male" ? "Male" : b === "female" ? "Female" : "Child"}
+                {b === "male" ? "Male" : b === "female" ? "Female" : b === "child" ? "Child" : "Neanderthal"}
               </button>
             ))}
           </div>

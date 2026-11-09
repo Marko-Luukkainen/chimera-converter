@@ -20,11 +20,13 @@ import type { HumanArtic, HumanFrame } from "../../wasm/types.ts";
 import { NEUTRAL } from "../../wasm/engine.ts";
 import type { TelemetryMessage } from "../../worklet/protocol.ts";
 import type { VoiceModel } from "../analysis.ts";
-import { V, heat, pressureLevel } from "../colors.ts";
+import { V, heat, mix, pressureLevel } from "../colors.ts";
 import { catmullRom, rotateAbout, type Vec } from "./geom.ts";
 import { chaikin, type Pt } from "./vector.ts";
 import { Beams, Poly } from "./beams3d.ts";
-import { bodyPoint, buildProfile, Gaze, jawAngle, wallX } from "./profile.ts";
+import { bodyPoint, buildProfile, Gaze, jawAngle, neanderthalMorph, neanderthalUnmorphY, wallX } from "./profile.ts";
+import { neanderthalShare } from "../body.ts";
+import { neanderthalHair, standingBody, type Figure, type HeadSurface, type Strand } from "./neanderthal3d.ts";
 import { faceHandles, type FaceView, type ViewFlags } from "./anatomy.ts";
 import { Expression } from "./expression.ts";
 
@@ -221,6 +223,11 @@ interface Rest {
   moustache: Float32Array[];
   /** the mullet's strands, drawn each frame so they sway (`hang` 0 at the scalp … 1 at the tip) */
   mullet: { a: Float32Array; hang: Float32Array }[];
+  /** the Neanderthal's bushy, frizzy hair and his beard (the beard's strands turn with the jaw) */
+  mane: Strand[];
+  beard: Strand[];
+  /** the Neanderthal stands: his body under the head (null for the other bodies, a head only) */
+  figure: Figure | null;
   eyes: V3[];
   eyeR: number;
 }
@@ -318,6 +325,13 @@ function buildRest(model: VoiceModel): Rest {
   const B = bodyPoint(model);
   const By = (Y: number) => B(0, Y).y;
   const unBy = (y: number) => (y / k >= 7 ? y / k : 7 - (7 - y / k) / ph);
+  // a Neanderthal's head is the template reshaped (profile.ts): its tables are read at the modern
+  // height a point came from, wider across the braincase, with a broader nose
+  const nShare = neanderthalShare(model.body);
+  const NM = neanderthalMorph(nShare);
+  const unY = neanderthalUnmorphY(nShare);
+  const wide = (Yt: number) => 1 + nShare * (0.05 + 0.07 * smooth(11, 17, Yt));
+  const nose = 1 + 0.3 * nShare;
   const P = (x: number, y: number) => t.P(x, y);
   // jaw closed, lips together
   const artic: HumanArtic = { ...NEUTRAL, jaw: 0, lipAp: 0, labiodental: 0 };
@@ -325,11 +339,11 @@ function buildRest(model: VoiceModel): Rest {
   const prof = buildProfile(model, frame, artic);
   const skin = [...prof.skinLower, ...prof.skinUpper];
   const head = new Shape(skin, 0.08 * k, (y, F, Bk) => {
-    const Y = unBy(y);
-    const plane = Y >= 3.4 && Y <= 16.1 ? interp(PLANE, Y) * k : Infinity;
+    const Y = unY(unBy(y));
+    const plane = Y >= 3.4 && Y <= 16.1 ? NM(interp(PLANE, Y), Y).x * k : Infinity;
     const Fs = Math.min(F, plane);
     const pf = 2.2 + 0.4 * smooth(2.5, 3.5, Y) * (1 - smooth(17, 18.5, Y));
-    return { F, Bk, Fs, W: interp(WIDTH, Y) * k, xw: Bk + (Fs - Bk) * interp(WIDEST, Y), E: F - Fs, wf: interp(FEATURE, Y) * k, pf };
+    return { F, Bk, Fs, W: interp(WIDTH, Y) * k * wide(Y), xw: Bk + (Fs - Bk) * interp(WIDEST, Y), E: F - Fs, wf: interp(FEATURE, Y) * k * (1 + (nose - 1) * bump((Y - 12) / 2.2)), pf };
   });
   const condyle = P(-2.5, 10.5);
   const lipTop = frame.upperLip[frame.upperLip.length - 1].y;
@@ -428,22 +442,22 @@ function buildRest(model: VoiceModel): Rest {
       for (let Y = 14.6; Y >= 11.3; Y -= 0.15) {
         const y = By(Y), s = head.at(y);
         if (!s) continue;
-        const z = side * (0.3 + (1.05 * (14.6 - Y)) / 3.3) * k;
+        const z = side * (0.3 + (1.05 * (14.6 - Y)) / 3.3) * k * nose;
         L.p(frontX(s, z), y, z);
       }
       L.end();
       const wing: [number, number, number][] = [[7.95, 11.05, 0.95], [7.4, 11.15, 1.45], [7.25, 11.6, 1.55], [7.55, 12.1, 1.35], [8.2, 12.15, 1.0]];
-      for (const [x, Y, z] of wing) L.p(x * k, By(Y), side * z * k);
+      for (const [x, Y, z] of wing) L.p(NM(x, Y).x * k, By(Y), side * z * k * nose);
       L.end();
     }
   });
   // ---- nostrils, under the tip of the nose
   group(fixed, V.blueMid, 1.0, 0.9, (L) => {
-    for (const side of [1, -1]) L.ellipse([8.05 * k, By(10.98), side * 0.62 * k], [0.42 * k, 0.04 * k, 0], [0, 0, 0.26 * k], 16);
+    for (const side of [1, -1]) L.ellipse([NM(8.05, 10.98).x * k, By(10.98), side * 0.62 * k * nose], [0.42 * k * nose, 0.04 * k, 0], [0, 0, 0.26 * k * nose], 16);
   });
 
   // ---- brain: rings and meridians over the 2D outline, the skull and its base stay on the midline
-  const brain = new Shape(prof.brain, 0.08 * k, (y, F, Bk) => ({ F, Bk, Fs: F, W: interp(BRAIN_WIDTH, unBy(y)) * k, xw: Bk + (F - Bk) * 0.48, E: 0, wf: 1, pf: 2.3 }));
+  const brain = new Shape(prof.brain, 0.08 * k, (y, F, Bk) => ({ F, Bk, Fs: F, W: interp(BRAIN_WIDTH, unY(unBy(y))) * k * wide(unY(unBy(y))), xw: Bk + (F - Bk) * 0.48, E: 0, wf: 1, pf: 2.3 }));
   group(fixed, V.blueMid, 0.85, 0.32, (L) => {
     for (let y = brain.y0 + 0.6 * k; y < brain.y1 - 0.15 * k; y += 1.5 * k) {
       const s = brain.at(y);
@@ -611,10 +625,34 @@ function buildRest(model: VoiceModel): Rest {
 
   const { moustache, mullet } = hair(head, lipTop, lipHalf, k);
 
-  // eyes: the 2D view draws one on the midline; here they sit either side of the nose
-  const eyeC = B(6.15, 15.35);
+  // the Neanderthal (the body at least half his): a bushy mop and a beard, and the body he stands on
+  let mane: Strand[] = [], beard: Strand[] = [], figure: Figure | null = null;
+  if (nShare >= 0.5) {
+    const surface: HeadSurface = {
+      y0: head.y0,
+      y1: head.y1,
+      at: (y, th) => {
+        const s = head.at(y);
+        if (!s || s.W < 0.2 * k) return null;
+        if (th <= Math.PI / 2) {
+          const z = s.W * Math.pow(Math.sin(th), 2 / s.pf);
+          return { x: s.xw + (s.Fs - s.xw) * Math.pow(Math.cos(th), 2 / s.pf) + s.E * bump(z / s.wf), z, xw: s.xw, hd: s.Fs - s.xw, W: s.W };
+        }
+        return { x: s.xw - (s.xw - s.Bk) * Math.pow(Math.abs(Math.cos(th)), 2 / PB), z: s.W * Math.pow(Math.sin(th), 2 / PB), xw: s.xw, hd: s.xw - s.Bk, W: s.W };
+      },
+    };
+    ({ mane, beard } = neanderthalHair(surface, k, (y) => unY(unBy(y)), (x, y) => jawWeight(k, ph, x, y), { top: lipTop, bottom: lipBottom, half: lipHalf }));
+    const neck = head.at(head.y0 + 0.1 * k);
+    if (neck) figure = standingBody({ y: head.y0, x: (neck.F + neck.Bk) / 2, hd: (neck.F - neck.Bk) / 2, hw: neck.W }, k);
+  }
+
+  // eyes: the 2D view draws one on the midline; here they sit either side of the nose (a
+  // Neanderthal's a little wider apart and bigger, in big round orbits)
+  const eyeM = NM(6.15, 15.35);
+  const eyeC = B(eyeM.x, eyeM.y);
+  const eyeZ = 3.15 * k * (1 + 0.06 * nShare);
   const center = new THREE.Vector3(0.3 * k, (head.y0 + head.y1) / 2, 0);
-  return { model, head, condyle, lipHalf, center, shell, fixed, jaw, chin, moustache, mullet, eyes: [[eyeC.x, eyeC.y, 3.15 * k], [eyeC.x, eyeC.y, -3.15 * k]], eyeR: 1.05 * k };
+  return { model, head, condyle, lipHalf, center, shell, fixed, jaw, chin, moustache, mullet, mane, beard, figure, eyes: [[eyeC.x, eyeC.y, eyeZ], [eyeC.x, eyeC.y, -eyeZ]], eyeR: 1.05 * k * (1 + 0.08 * nShare) };
 }
 
 /**
@@ -633,7 +671,7 @@ function hair(head: Shape, lipTop: number, lipHalf: number, k: number): { mousta
       for (let i = 0; i < N; i++) {
         const u = (i + 0.33 * layer) / N;
         const z0 = side * (0.1 + 1.3 * u) * k;
-        const z1 = side * (lipHalf * (0.85 + 0.35 * u) + 0.2 * k);
+        const z1 = side * (lipHalf * (0.95 + 0.5 * u) + 0.35 * k);
         const y0 = lipTop + (0.85 - 0.2 * u) * k;
         const y1 = lipTop - (0.9 + 2.3 * u * u) * k;
         const pts: number[] = [];
@@ -657,8 +695,8 @@ function hair(head: Shape, lipTop: number, lipHalf: number, k: number): { mousta
   const step = 0.3 * k;
   for (const side of [1, -1]) {
     for (let i = 0; i < 9; i++) {
-      // round the back of the head only: a mullet's sides stay short
-      const th = Math.PI * (0.7 + (0.3 * i) / 8);
+      // from the side behind the ear round to the middle of the back
+      const th = Math.PI * (0.56 + (0.44 * i) / 8);
       if (side < 0 && i === 8) continue; // the middle strand once
       const ct = Math.pow(Math.abs(Math.cos(th)), 2 / PB), st = Math.pow(Math.sin(th), 2 / PB);
       const y0 = yTop - (1.2 + 2.2 * (1 - i / 8)) * k; // the side strands start lower, round the crown
@@ -720,10 +758,15 @@ interface Echo {
 }
 const ECHO_AGES = [0.09, 0.06, 0.03];
 
+/** the Neanderthal's hair: a reddish brown (some Neanderthals carried a red-hair MC1R variant) */
+const HAIR = mix(V.amber, V.red, 0.3);
+
 export class Anatomy3D {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(24, 1, 5, 2000);
   private readonly beams = new Beams();
+  /** the standing body: its own frame, so it stays put while the head nods and sways */
+  private readonly bodyBeams = new Beams();
   private rest: Rest | null = null;
   private w = 1;
   private h = 1;
@@ -760,12 +803,14 @@ export class Anatomy3D {
 
   constructor() {
     this.scene.add(this.beams.group);
+    this.scene.add(this.bodyBeams.group);
     this.scene.fog = new THREE.Fog(0x000000, 50, 100);
     for (let i = 0; i < 200; i++) this.particles.push({ s: Math.random() * 17, u: Math.random() * 2 - 1, v: Math.random() * 2 - 1, life: Math.random(), px: NaN, py: NaN, pz: NaN });
   }
 
   dispose(): void {
     this.beams.dispose();
+    this.bodyBeams.dispose();
   }
 
   /** forget the motion so far (a replay jumped): the face's springs and held-note time, the
@@ -788,6 +833,7 @@ export class Anatomy3D {
     else this.camera.setViewOffset(w, h, 0.1 * w, 0, w, h);
     this.camera.updateProjectionMatrix();
     this.beams.setResolution(w, h);
+    this.bodyBeams.setResolution(w, h);
     for (const p of this.particles) p.px = NaN;
   }
 
@@ -795,9 +841,13 @@ export class Anatomy3D {
   poses(model: VoiceModel): { target: THREE.Vector3; home: THREE.Vector3; side: THREE.Vector3 } {
     const r = this.restFor(model);
     const half = Math.tan((this.camera.fov * Math.PI) / 360);
-    // fit the head's height (and its width in a narrow screen) at a male's size, so bodies compare
-    const d = 1.1 * Math.max(15.2 / half, 11 / (half * Math.max(0.3, this.camera.aspect)));
-    const target = r.center.clone();
+    // fit the head's height (and its width in a narrow screen) at a male's size, so bodies compare;
+    // a standing body is seen whole, head to feet (zoom in to the head from there)
+    const fig = r.figure;
+    const d = fig
+      ? 1.08 * Math.max((fig.top - fig.bottom) / 2 / half, 34 * model.tract.scale / (half * Math.max(0.3, this.camera.aspect)))
+      : 1.1 * Math.max(15.2 / half, 11 / (half * Math.max(0.3, this.camera.aspect)));
+    const target = fig ? new THREE.Vector3(fig.cx, (fig.top + fig.bottom) / 2, 0) : r.center.clone();
     // facing left: the same three-quarter view from the head's other side
     const az = this.facing > 0 ? 0.62 : Math.PI - 0.62, el = 0.2;
     return {
@@ -805,6 +855,11 @@ export class Anatomy3D {
       home: target.clone().add(new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)).multiplyScalar(d)),
       side: target.clone().add(new THREE.Vector3(0, 0, this.facing * d)),
     };
+  }
+
+  /** whether this body stands (the camera frames the whole figure) */
+  standing(model: VoiceModel): boolean {
+    return this.restFor(model).figure !== null;
   }
 
   private restFor(model: VoiceModel): Rest {
@@ -861,7 +916,8 @@ export class Anatomy3D {
     const dist = this.camera.position.distanceTo(rest.center);
     const fog = this.scene.fog as THREE.Fog;
     fog.near = dist - 3 * k;
-    fog.far = dist + 30 * k;
+    // a standing body reaches far below the head: let it fade, not vanish
+    fog.far = dist + (rest.figure ? 240 : 30) * k;
 
     B.begin();
     const flat = (pts: Vec[], z = 0): Float32Array => {
@@ -907,7 +963,7 @@ export class Anatomy3D {
     }
     // ---- the moustache, and the mullet: a slow sway, and a buzz as loud as the voice
     const loud = tele ? Math.min(1, 4 * tele.t.outRms) : 0;
-    if (this.hair) for (const l of rest.moustache) B.line(l, l.length / 3, V.white, 1.2, { alpha: 0.9 });
+    if (this.hair) for (const l of rest.moustache) B.line(l, l.length / 3, V.white, 1.4, { alpha: 0.95, hot: true });
     if (this.hair) rest.mullet.forEach((m, si) => {
       const P = this.tmp.reset();
       const ph = 0.7 * si;
@@ -919,6 +975,10 @@ export class Anatomy3D {
       }
       B.poly(P, V.white, 1.0, { alpha: 0.55 + 0.3 * loud });
     });
+    // ---- the Neanderthal's mop and beard: the same sway and buzz, the beard turning with the jaw
+    if (rest.mane.length) this.strands(rest, rest.mane, loud, k, 0, 0.42);
+    if (rest.beard.length) this.strands(rest, rest.beard, loud, k, phi, 0.5);
+    this.figure(rest, tele);
 
     // ---- the midsagittal section, as the 2D view draws it
     const G = buildProfile(model, f, a);
@@ -1000,6 +1060,46 @@ export class Anatomy3D {
    * the vibrato) about the top of the neck. Everything is drawn in the head's frame, so this
    * turns the beams' group; the camera's position in that frame is kept for what faces it.
    */
+  /** hair strands: a slow sway and a buzz as loud as the voice, more of both towards the tips */
+  private strands(rest: Rest, list: Strand[], loud: number, k: number, phi: number, alpha: number): void {
+    const C = rest.condyle;
+    for (const m of list) {
+      const P = this.tmp.reset();
+      const swayZ = 0.3 * k * Math.sin(1.4 * this.clock + m.ph), swayX = 0.18 * k * Math.sin(0.9 * this.clock + m.ph + 1);
+      const ang = phi * m.w;
+      for (let i = 0; i < m.hang.length; i++) {
+        const h = m.hang[i];
+        const buzz = 0.1 * k * loud * Math.sin(37 * this.clock + 1.7 * i + m.ph);
+        let x = m.a[3 * i] + h * (swayX + buzz), y = m.a[3 * i + 1];
+        if (ang !== 0) [x, y] = rotXY(x, y, C, ang);
+        P.p(x, y, m.a[3 * i + 2] + h * (swayZ + buzz));
+      }
+      this.beams.poly(P, HAIR, 0.85, { alpha: alpha * (0.85 + 0.3 * loud) });
+    }
+  }
+
+  /** the standing body, in its own frame (the head nods over it): the chest rises and falls with
+   *  the breath, and swells as the lungs push on a sung or spoken phrase */
+  private figure(rest: Rest, tele: TelemetryMessage | null): void {
+    const B = this.bodyBeams;
+    B.begin();
+    const fig = rest.figure;
+    if (fig) {
+      const push = tele ? Math.min(1, Math.max(0, tele.t.pLung) / 15) : 0; // cmH₂O
+      const e = 0.018 * Math.sin(2 * Math.PI * 0.22 * this.clock) + 0.02 * push;
+      const P = this.tmp;
+      for (const l of fig.lines) {
+        P.reset();
+        for (let i = 0; i < l.c.length; i++) {
+          const g = 1 + e * l.c[i];
+          P.p(fig.cx + (l.a[3 * i] - fig.cx) * g, l.a[3 * i + 1], l.a[3 * i + 2] * g);
+        }
+        B.poly(P, V.blueDim, 0.85, { alpha: 0.5 });
+      }
+    }
+    B.end();
+  }
+
   private headPose(rest: Rest, k: number): void {
     const g = this.beams.group;
     const pivot = this.v3.set(-2.4 * k, rest.head.y0 + 0.42 * (rest.condyle.y - rest.head.y0), 0);

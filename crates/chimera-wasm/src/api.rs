@@ -161,7 +161,7 @@ fn dispatch(st: &mut State, req: &Value) -> Res {
 
 /// Everything constant the UI needs: articulators, bodies, defaults, sound catalogues.
 fn catalog() -> Res {
-    use chimera::anatomy::human::{ArticKey, BODY_CHILD, BODY_FEMALE, BODY_MALE, NEUTRAL};
+    use chimera::anatomy::human::{ArticKey, BODY_CHILD, BODY_FEMALE, BODY_MALE, BODY_NEANDERTHAL, NEUTRAL};
     use chimera::control::articulators::ARTIC_SPECS;
     use chimera::voice::human_voice::DEFAULT_SOURCE;
     let specs: serde_json::Map<String, Value> = ArticKey::ALL.iter().map(|k| (k.name().to_string(), serde_json::to_value(ARTIC_SPECS[k.index()]).unwrap())).collect();
@@ -171,7 +171,7 @@ fn catalog() -> Res {
         .collect();
     Ok(json!({
         "neutral": NEUTRAL,
-        "bodies": { "male": BODY_MALE, "female": BODY_FEMALE, "child": BODY_CHILD },
+        "bodies": { "male": BODY_MALE, "female": BODY_FEMALE, "child": BODY_CHILD, "neanderthal": BODY_NEANDERTHAL },
         "articKeys": ArticKey::NAMES,
         "articSpecs": specs,
         "defaultSource": DEFAULT_SOURCE,

@@ -76,6 +76,7 @@ function TopBar() {
               { value: "male", label: "Male" },
               { value: "female", label: "Female" },
               { value: "child", label: "Child" },
+              { value: "neanderthal", label: "Neanderthal" },
             ]}
           />
           <BodyPad />

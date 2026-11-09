@@ -160,7 +160,7 @@ export function DuetPage(props: { id: string }) {
     const kept = showStyle(props.id);
     const sungAs = (loaded.melody as { body?: string }).body;
     if (kept) applyStyle(kept);
-    else if (sungAs === "male" || sungAs === "female" || sungAs === "child") applyStyle({ body: PRESETS[sungAs] });
+    else if (sungAs === "male" || sungAs === "female" || sungAs === "child" || sungAs === "neanderthal") applyStyle({ body: PRESETS[sungAs] });
     transport?.pause();
     setLive(ls);
     return () => {
