@@ -1,0 +1,30 @@
+﻿CHIMERA + suomen tuki + muunnin: siirto toiselle koneelle
+=========================================================
+
+Tämä kansio sisältää kaiken, mitä toinen kone tarvitsee:
+  chimera-vocal-synth\   Chimera kaikkine muutoksineen (myös git-historia ja omat commitit),
+                         valmiiksi käännetty moottori (src\wasm\chimera.wasm) ja chimera.exe,
+                         muunnin (tools\chimera-convert) valmiiksi käännettynä sovelluksena
+  mallit\                (jos otit mukaan) sanojen kohdistusmalli ja äänen erotusmalli
+  ASENNA.bat             asentaa kaiken
+
+ASENNUS
+  1. Kopioi koko ChimeraSiirto-kansio uudelle koneelle (tai käytä sitä suoraan USB-tikulta).
+  2. Kaksoisnapsauta ASENNA.bat. Se kysyy asennuskansion (Enter = %USERPROFILE%\chimera-vocal-synth).
+  3. Asennus hakee netistä puuttuvat ohjelmat (Python 3.12, Bun) wingetillä sekä
+     Python-paketit (torch noin 2,5 Gt). Aikaa kuluu tyypillisesti 10-20 minuuttia.
+  4. Työpöydälle tulee kaksi kuvaketta: "Chimera" ja "Chimera-muunnin".
+
+VAATIMUKSET
+  - Windows 10/11 ja nettiyhteys asennuksen ajan.
+  - NVIDIA-näytönohjain nopeuttaa muunnosta paljon; ilman sitä muunnin toimii CPU:lla hitaammin.
+  - Rustia EI tarvita Chimeran käyttämiseen. Jos haluat muokata ja kääntää moottoria
+    uudella koneella, aja komentokehotteessa:  ASENNA.bat -Dev
+    (asentaa myös Rustin ja Visual Studion C++-työkalut, noin 3 Gt).
+
+HUOM
+  - Python-ympäristöä ja node_modules-kansiota ei voi kopioida koneelta toiselle,
+    siksi ne asennetaan uudelleen.
+  - Omat kappaleet (out\sessions, public\shows) sisältävät tekijänoikeuden alaista
+    materiaalia: vain omaan käyttöön, ei gittiin eikä jakoon.
+  - Loki: <asennuskansio>\asennus.log ja tools\chimera-convert\out\install.log

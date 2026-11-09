@@ -1,0 +1,15 @@
+# Install torch first, with CUDA (see README), then: pip install -r requirements.txt
+numpy
+scipy
+librosa>=0.10
+soundfile>=0.12
+matplotlib
+torchcrepe>=0.0.22
+demucs==4.0.1
+transformers>=4.40
+pytest
+# the app's server
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9
+httpx

@@ -349,6 +349,27 @@ fn compare_csd_refuses_an_unmapped_phoneme() {
 }
 
 #[test]
+fn render_notes_reads_finnish_lyrics_when_lang_is_fi() {
+    // "Hyvää yötä" is four Finnish syllables (hy-vää-yö-tä). Read as English, "ä" and "ö" are
+    // not letters and the count is wrong, so the render fails on the note count.
+    let fi = tmp("melody-fi.json");
+    let notes = r#""notes": [[65, 1], [67, 1], [69, 1], [65, 1]]"#;
+    std::fs::write(&fi, format!(r#"{{"bpm": 120, "lang": "fi", "lyrics": "Hyvää yötä.", {notes}}}"#)).unwrap();
+    let stdout = chimera(&["render", "notes", &fi, &tmp("notes-fi"), "female"]);
+    assert!(stdout.contains("4 notes"), "{stdout}");
+
+    let en = tmp("melody-fi-as-en.json");
+    std::fs::write(&en, format!(r#"{{"bpm": 120, "lyrics": "Hyvää yötä.", {notes}}}"#)).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_chimera")).args(["render", "notes", &en, &tmp("notes-fi-as-en"), "female"]).output().unwrap();
+    assert!(!out.status.success(), "English rules read Finnish lyrics as 4 syllables");
+
+    let bad = tmp("melody-bad-lang.json");
+    std::fs::write(&bad, format!(r#"{{"bpm": 120, "lang": "sv", "lyrics": "Hej", "notes": [[60, 1]]}}"#)).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_chimera")).args(["render", "notes", &bad, &tmp("notes-bad"), "female"]).output().unwrap();
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unknown lang"));
+}
+
+#[test]
 fn render_notes_artic_tracks_follow_the_sound_without_changing_it() {
     let melody = tmp("melody.json");
     std::fs::write(

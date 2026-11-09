@@ -21,7 +21,8 @@ usage: chimera <command> [args] [--float]
   render fi      <out> [\"Suomenkielinen teksti.\"] [male|female|child]
   render song    [outdir] [male|female|child]
   render notes   <in.json> <out> [male|female|child] [--artic tracks.json] [--tele voice.tele]
-                 (melody file; midi <= 0 is a rest; --artic also writes the articulators at 100 Hz)
+                 (melody file; midi <= 0 is a rest; \"lang\": \"fi\" for Finnish lyrics;
+                  --artic also writes the articulators at 100 Hz)
   render beatbox [outdir] [preset name | pattern] [male|female|child] [bpm] [bars]
   render creature [creatureId] [outdir]
   render vowels  [male|female|child] [out]

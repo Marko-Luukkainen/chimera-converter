@@ -496,7 +496,8 @@ fn render_tracked(v: &mut HumanVoice, out: &mut [f32], artic: bool, tele: bool) 
     Ok((frames, rec))
 }
 
-/// A melody from a JSON file: `{"bpm", "lyrics", "notes": [[midi, beats], ...], "vibrato"?}`.
+/// A melody from a JSON file: `{"bpm", "lyrics", "notes": [[midi, beats], ...], "vibrato"?, "lang"?}`
+/// (`"lang": "fi"` for Finnish lyrics).
 /// One lyric syllable per sounding note; a note with midi <= 0 is a rest, which splits the
 /// melody into phrases planned separately on one voice.
 /// `render notes <in.json> <out> [body] [--artic tracks.json] [--tele voice.tele]`: `--artic` also
@@ -527,8 +528,17 @@ pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let bpm = j["bpm"].as_f64().ok_or("bpm missing")?;
     let vibrato = j["vibrato"].as_f64().unwrap_or(35.0);
     let raw: Vec<[f64; 2]> = serde_json::from_value(j["notes"].clone()).map_err(|e| format!("notes: {e}"))?;
-    let g = g2p()?;
-    let syl = lyrics_to_syllables(j["lyrics"].as_str().ok_or("lyrics missing")?, &g);
+    // "lang": "fi" sings Finnish (its rule syllables and timing); English when absent
+    let language = match j["lang"].as_str() {
+        None | Some("en") => None,
+        Some("fi") => Some(Language::Finnish),
+        Some(x) => return Err(format!("{input}: unknown lang {x:?}; have en, fi")),
+    };
+    let lyrics = j["lyrics"].as_str().ok_or("lyrics missing")?;
+    let syl = match language {
+        Some(Language::Finnish) => chimera::phonetics::finnish::lyrics_to_syllables(lyrics),
+        _ => lyrics_to_syllables(lyrics, &g2p()?),
+    };
     let sounding = raw.iter().filter(|n| n[0] > 0.0).count();
     if syl.len() != sounding {
         return Err(format!("{} syllables for {sounding} notes: {}", syl.len(),
@@ -552,7 +562,7 @@ pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         if phrase.is_empty() {
             return;
         }
-        let plan = plan_song(phrase, &SongOptions { body: body_name.into(), bpm, t0: start, vibrato, language: None });
+        let plan = plan_song(phrase, &SongOptions { body: body_name.into(), bpm, t0: start, vibrato, language });
         v.schedule(&plan.gestures);
         *end = js_max(*end, plan.end);
         phrase.clear();
