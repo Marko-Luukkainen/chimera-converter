@@ -2119,6 +2119,10 @@ input[type="range"]::-moz-range-thumb {
   height: 100%;
 }
 
+.song-error {
+  color: var(--red);
+  font-size: 12px;
+}
 .demo-songs {
   display: flex;
   flex-wrap: wrap;
@@ -2150,6 +2154,13 @@ input[type="range"]::-moz-range-thumb {
   align-content: flex-start;
   gap: 4px 0;
   overflow-y: auto;
+  /* a long song scrolls here (following the syllable being sung) instead of growing the screen:
+     the lyrics row is sized by its content, so a whole song's syllables took over half the column
+     and squeezed the piano roll and the keys. About five rows of syllables, fewer on short screens */
+  max-height: clamp(64px, 15vh, 116px);
+  overscroll-behavior: contain;
+  /* the offsets the list scrolls by are measured from here */
+  position: relative;
 }
 
 .syl-wrap {
@@ -2845,6 +2856,129 @@ input[type="range"]::-moz-range-thumb {
 
 .duet-msg.error {
   color: var(--amber);
+}
+
+/* the live voice: its panel beside the head (below it on a narrow screen) */
+.duet.with-voice {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas: "top top" "heads voice" "bar bar";
+}
+
+.duet.with-voice .duet-top {
+  grid-area: top;
+}
+
+.duet.with-voice .duet-heads {
+  grid-area: heads;
+}
+
+.duet.with-voice .duet-voice {
+  grid-area: voice;
+}
+
+.duet.with-voice .duet-bar {
+  grid-area: bar;
+}
+
+.duet-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.duet-voice .screen-body {
+  overflow-y: auto;
+}
+
+.voice-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 10px 10px;
+}
+
+.voice-styles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.voice-styles.mine {
+  padding-top: 6px;
+  border-top: 1px solid var(--frame);
+}
+
+.voice-mine {
+  display: inline-flex;
+}
+
+.voice-mine .enc-tab + .enc-tab {
+  border-left: none;
+}
+
+.voice-mine.on .enc-tab:first-child {
+  color: var(--blue);
+  border-color: var(--blue);
+  text-shadow: var(--glow-blue);
+}
+
+.voice-del {
+  padding: 2px 5px;
+}
+
+.voice-save {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.voice-save input {
+  width: 9em;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--blue-mid);
+  background: transparent;
+  color: var(--blue);
+  font-family: var(--font);
+  font-size: 11px;
+}
+
+.voice-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.voice-body .body-pad svg {
+  width: 128px;
+  height: 64px;
+}
+
+.voice-body-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.voice-panel .enc-pages {
+  padding: 0;
+}
+
+.voice-error {
+  margin: 0;
+  color: var(--amber);
+  font-size: 11px;
+}
+
+@media (max-width: 900px) {
+  .duet.with-voice {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(220px, 1fr) auto auto;
+    grid-template-areas: "top" "heads" "voice" "bar";
+    height: auto;
+    min-height: 100dvh;
+  }
 }
 
 @media (max-width: 720px) {

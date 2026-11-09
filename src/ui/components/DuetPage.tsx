@@ -15,6 +15,10 @@
  * syllables by its `"lang"` (Finnish rules for "fi", the English dictionary otherwise, as the CLI
  * sang them), and the show's `spell` ({"owr": "our"}) writes a syllable spelled for the dictionary
  * as it should read.
+ *
+ * A show of one voice with its melody can also be sung live (the default then): the engine sings
+ * the melody here, with the voice panel's settings heard as they change, over the show's `backing`
+ * (the recording without its voice, on the same clock as the melody) when it has one.
  */
 import { useEffect, useRef, useState } from "react";
 import { AnatomyView3D, type HeadFeed } from "./AnatomyView3D.tsx";
@@ -31,10 +35,19 @@ import { g2p } from "../speech.ts";
 import { lyricsToSyllables, finnishLyricsToSyllables } from "../../wasm/engine.ts";
 import { sungWords, wordAt, type Melody, type SungWords } from "../../show/words.ts";
 import type { OverlayFn } from "./AnatomyView.tsx";
+import { LiveShow } from "../liveShow.ts";
+import { LiveVoicePanel } from "./LiveVoicePanel.tsx";
+import { engine } from "../../audio/AudioEngine.ts";
+import { useStore } from "../store.ts";
+import { PRESETS, sameBody } from "../body.ts";
+import { applyStyle, showStyle } from "../voiceStyle.ts";
+import type { SongFile } from "../singing.ts";
 
 interface ShowFile {
   title: string;
   audio: string;
+  /** the recording without its voice, for the live voice to sing over */
+  backing?: string;
   bpm?: number;
   downbeat?: number;
   spell?: Record<string, string>;
@@ -44,6 +57,30 @@ interface ShowFile {
 interface Loaded {
   show: ShowFile;
   voices: { name: string; track: TeleTrack; words: SungWords | null }[];
+  /** what a live voice sings: the only voice's melody */
+  melody: Melody | null;
+  backing: ArrayBuffer | null;
+}
+
+/** what the bar and the heads follow: the recorded show's transport or the live one */
+interface Player {
+  readonly isPlaying: boolean;
+  readonly duration: number;
+  readonly epoch: number;
+  time(): number;
+  play(): void | Promise<void>;
+  pause(): void;
+  seek(t: number): void;
+  subscribe(f: () => void): () => void;
+}
+
+const LIVE_KEY = "chimera.duetLive";
+function liveWanted(): boolean {
+  try {
+    return localStorage.getItem(LIVE_KEY) !== "0";
+  } catch {
+    return true;
+  }
 }
 
 /** the heads as the face screen shows them by default, less the measurement labels */
@@ -96,23 +133,62 @@ export function DuetPage(props: { id: string }) {
       });
       const voices = show.voices.map((v, i) => ({ name: v.name, track: new TeleTrack(teles[i]), words: words[i] }));
       await transport.load(audio);
-      if (live) setLoaded({ show, voices });
+      const melody = show.voices.length === 1 && words[0] ? melodies[0] : null;
+      const backing = melody && show.backing ? await fetchOk(base + show.backing).then((r) => r.arrayBuffer()).catch(() => null) : null;
+      if (live) setLoaded({ show, voices, melody, backing });
     })().catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
     return () => {
       live = false;
     };
   }, [base, transport]);
 
-  // the readouts follow the transport: at once on a change, and a few times a second while it plays
+  // the live voice: the engine sings the melody with the voice panel's settings
+  const [liveOn, setLiveOn] = useState(liveWanted);
+  const [panel, setPanel] = useState(true);
+  const [live, setLive] = useState<LiveShow | null>(null);
+  const canLive = !!loaded?.melody;
   useEffect(() => {
-    if (!transport) return;
-    const off = transport.subscribe(() => setTick((n) => n + 1));
-    const id = setInterval(() => transport.isPlaying && setTick((n) => n + 1), 250);
+    if (!loaded?.melody || !liveOn) return;
+    let ls: LiveShow;
+    try {
+      ls = new LiveShow(loaded.melody as SongFile, loaded.backing, loaded.show.title);
+    } catch (e) {
+      console.warn("duet: can't sing this show live:", e);
+      return;
+    }
+    // the voice this show was last sung with
+    const kept = showStyle(props.id);
+    const sungAs = (loaded.melody as { body?: string }).body;
+    if (kept) applyStyle(kept);
+    else if (sungAs === "male" || sungAs === "female" || sungAs === "child") applyStyle({ body: PRESETS[sungAs] });
+    transport?.pause();
+    setLive(ls);
+    return () => {
+      ls.dispose();
+      setLive(null);
+    };
+  }, [loaded, liveOn, props.id, transport]);
+  const useLive = liveOn && !!live;
+  const player: Player | null = useLive ? live : transport;
+  const switchLive = (on: boolean) => {
+    try {
+      localStorage.setItem(LIVE_KEY, on ? "1" : "0");
+    } catch {
+      // not kept
+    }
+    setLiveOn(on);
+  };
+
+  // the readouts follow the player: at once on a change, and a few times a second while it plays
+  useEffect(() => {
+    if (!player) return;
+    const off = player.subscribe(() => setTick((n) => n + 1));
+    const id = setInterval(() => player.isPlaying && setTick((n) => n + 1), 250);
     return () => {
       off();
       clearInterval(id);
     };
-  }, [transport]);
+  }, [player]);
 
   if (error)
     return (
@@ -120,19 +196,44 @@ export function DuetPage(props: { id: string }) {
         <p className="duet-msg error">This show could not load: {error}</p>
       </div>
     );
-  const st = transport?.state ?? { playing: false, time: 0, duration: 0, epoch: 0 };
+  const st = player ? { playing: player.isPlaying, time: player.time(), duration: player.duration } : { playing: false, time: 0, duration: 0 };
   const title = loaded?.show.title ?? "Loading…";
+  const showPanel = useLive && panel;
   return (
-    <div className="duet">
+    <div className={`duet${showPanel ? " with-voice" : ""}`}>
       <header className="duet-top">
         <span className="wordmark">Chimera</span>
         <span className="duet-title">{title}</span>
+        {canLive && (
+          <div className="duet-modes" role="group" aria-label="Who sings">
+            <button type="button" className={`enc-tab${!liveOn ? " on" : ""}`} aria-pressed={!liveOn} onClick={() => switchLive(false)} title="The render as it was made">
+              Recorded
+            </button>
+            <button type="button" className={`enc-tab${liveOn ? " on" : ""}`} aria-pressed={liveOn} onClick={() => switchLive(true)} title="Chimera sings it here, with your voice settings">
+              Live voice
+            </button>
+            {liveOn && (
+              <button type="button" className={`enc-tab${panel ? " on" : ""}`} aria-pressed={panel} onClick={() => setPanel(!panel)}>
+                Voice settings
+              </button>
+            )}
+          </div>
+        )}
       </header>
       <main className="duet-heads" style={{ "--voices": loaded?.voices.length ?? 2 } as React.CSSProperties}>
-        {loaded && transport ? loaded.voices.map((v, i) => <Head key={i} name={v.name} track={v.track} words={v.words} show={loaded.show} transport={transport} facing={i > 0 && i === loaded.voices.length - 1 ? -1 : 1} />) : <p className="duet-msg">Loading the song…</p>}
+        {loaded && transport ? (
+          useLive && live ? (
+            <LiveHead name={loaded.voices[0].name} words={loaded.voices[0].words} live={live} />
+          ) : (
+            loaded.voices.map((v, i) => <Head key={i} name={v.name} track={v.track} words={v.words} show={loaded.show} transport={transport} facing={i > 0 && i === loaded.voices.length - 1 ? -1 : 1} />)
+          )
+        ) : (
+          <p className="duet-msg">Loading the song…</p>
+        )}
       </main>
+      {showPanel && live && <LiveVoicePanel showId={props.id} live={live} />}
       <footer className="duet-bar">
-        <button className="primary large" disabled={!loaded} onClick={() => (st.playing ? transport?.pause() : transport?.play())}>
+        <button className="primary large" disabled={!loaded} onClick={() => (st.playing ? player?.pause() : void player?.play())}>
           {st.playing ? "Pause" : st.duration > 0 && st.time >= st.duration - 0.05 ? "Again" : "Play"}
         </button>
         <span className="duet-time">
@@ -146,11 +247,41 @@ export function DuetPage(props: { id: string }) {
           step={0.1}
           value={st.time}
           disabled={!loaded}
-          onChange={(e) => transport?.seek(Number(e.target.value))}
+          onChange={(e) => player?.seek(Number(e.target.value))}
           style={{ "--pos": `${st.duration ? (100 * st.time) / st.duration : 0}%` } as React.CSSProperties}
         />
       </footer>
     </div>
+  );
+}
+
+/** the live voice's head: the engine's own telemetry, with the body the voice panel sets */
+function LiveHead(props: { name: string; words: SungWords | null; live: LiveShow }) {
+  const { live, words } = props;
+  const body = useStore((s) => s.body);
+  const feedRef = useRef<HeadFeed | null>(null);
+  const overlayRef = useRef<OverlayFn | undefined>(undefined);
+  if (words && !overlayRef.current) overlayRef.current = mouthWords(() => (live.isPlaying ? wordAt(words, live.time()) : null), V.green, 1);
+  if (!feedRef.current) {
+    feedRef.current = {
+      get model() {
+        return getModel(useStore.getState().body, engine.sampleRate || 48000);
+      },
+      view: VIEW,
+      maxDpr: 1.5,
+      facing: 1,
+      frame: () => {
+        const st = useStore.getState();
+        const lat = engine.latest;
+        const tele = live.isPlaying && lat && sameBody(lat.body, st.body) ? lat : null;
+        return { tele, artic: tele ? VoiceModel.articFromArray(tele.t.artic) : st.artic, epoch: live.epoch };
+      },
+    };
+  }
+  return (
+    <Screen className="duet-head" focus title={props.name} sub={bodyLabel(body)} label={`${props.name} voice, ${bodyLabel(body)}, in 3D, sung live`}>
+      <AnatomyView3D feed={feedRef.current} readouts={false} overlay={overlayRef.current} />
+    </Screen>
   );
 }
 

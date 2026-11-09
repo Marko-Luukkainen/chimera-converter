@@ -26,8 +26,17 @@ class FakeContext {
   outputLatency = 0.2;
   baseLatency = 0;
   state = "suspended";
-  onstatechange: (() => void) | null = null;
+  listeners: (() => void)[] = [];
   destination = {};
+  addEventListener(_type: string, f: () => void) {
+    this.listeners.push(f);
+  }
+  removeEventListener(_type: string, f: () => void) {
+    this.listeners = this.listeners.filter((g) => g !== f);
+  }
+  createGain() {
+    return { gain: { setTargetAtTime() {} }, connect() {}, disconnect() {} };
+  }
   sources: FakeSource[] = [];
   resumeResult: "ok" | "fail" = "ok";
   createBufferSource() {
@@ -47,7 +56,7 @@ class FakeContext {
   }
   setState(s: string) {
     this.state = s;
-    this.onstatechange?.();
+    for (const f of this.listeners) f();
   }
 }
 

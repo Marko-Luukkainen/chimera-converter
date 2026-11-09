@@ -9,6 +9,9 @@
  * history can be reset) and restarts a fresh source. The track ends when its end is heard, not when
  * the source finishes rendering. The context leaving "running" (an iOS interruption, the page
  * going to the background), or failing to resume after Play, pauses the transport where it was.
+ *
+ * It can also play on another's context (the voice engine's, for a backing track under a live
+ * voice: one clock for both); that context is then left open on dispose.
  */
 export type TransportState = { playing: boolean; time: number; duration: number; epoch: number };
 
@@ -26,14 +29,26 @@ export class Transport {
   private wasRunning = false;
   epoch = 0;
   private readonly listeners = new Set<() => void>();
+  private readonly own: boolean;
+  private readonly out: GainNode;
+  private readonly onState = () => {
+    const running = this.ctx.state === "running";
+    if (this.wasRunning && !running && this.playing) this.pause();
+    this.wasRunning = running;
+  };
 
-  constructor(ctx: AudioContext = new AudioContext({ latencyHint: "playback" })) {
-    this.ctx = ctx;
-    this.ctx.onstatechange = () => {
-      const running = this.ctx.state === "running";
-      if (this.wasRunning && !running && this.playing) this.pause();
-      this.wasRunning = running;
-    };
+  constructor(ctx?: AudioContext, own = !ctx) {
+    this.own = own;
+    this.ctx = ctx ?? new AudioContext({ latencyHint: "playback" });
+    this.ctx.addEventListener("statechange", this.onState);
+    this.wasRunning = this.ctx.state === "running";
+    this.out = this.ctx.createGain();
+    this.out.connect(this.ctx.destination);
+  }
+
+  /** the track's level (1: as recorded) */
+  set volume(v: number) {
+    this.out.gain.setTargetAtTime(Math.max(0, v), this.ctx.currentTime, 0.02);
   }
 
   async load(data: ArrayBuffer): Promise<void> {
@@ -62,8 +77,9 @@ export class Transport {
     for (const f of this.listeners) f();
   }
 
-  /** Call from the tap itself: iOS only lets a user gesture start audio. */
-  play(): void {
+  /** Call from the tap itself: iOS only lets a user gesture start audio. `when`: the context time
+   * to start at (now when absent or past). */
+  play(when?: number): void {
     if (!this.buffer || this.playing) return;
     const gen = ++this.generation;
     this.ctx.resume().catch(() => {
@@ -71,7 +87,7 @@ export class Transport {
       if (gen === this.generation && this.playing) this.pause();
     });
     if (this.offset >= this.duration - 0.05) this.offset = 0;
-    this.startSource();
+    this.startSource(when);
     this.playing = true;
     this.emit();
   }
@@ -113,19 +129,21 @@ export class Transport {
     this.generation++;
     this.stopSource();
     this.listeners.clear();
-    void this.ctx.close().catch(() => {});
+    this.ctx.removeEventListener("statechange", this.onState);
+    this.out.disconnect();
+    if (this.own) void this.ctx.close().catch(() => {});
   }
 
-  private startSource(): void {
+  private startSource(when?: number): void {
     const src = this.ctx.createBufferSource();
     src.buffer = this.buffer;
-    src.connect(this.ctx.destination);
+    src.connect(this.out);
     src.onended = () => {
       if (this.src === src) this.rendered = true;
     };
     this.src = src;
     this.rendered = false;
-    this.startedAt = this.ctx.currentTime;
+    this.startedAt = Math.max(this.ctx.currentTime, when ?? 0);
     src.start(this.startedAt, this.offset);
   }
 

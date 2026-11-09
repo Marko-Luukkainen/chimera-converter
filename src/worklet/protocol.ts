@@ -21,7 +21,7 @@ export type ToWorklet =
   | { type: "gate"; level: number }
   | { type: "telemetry"; enabled: boolean }
   /** gestures planned on the main thread with times relative to "now" (the worklet adds its clock) */
-  | { type: "schedule"; gestures: Gesture[]; segments: PlannedSegment[]; end: number; id: number; replace: boolean; lead?: number }
+  | { type: "schedule"; gestures: Gesture[]; segments: PlannedSegment[]; end: number; id: number; replace: boolean; lead?: number; at?: number }
   | { type: "stopSpeech" }
   /** switch the active voice: "human" or a creature id */
   | { type: "creature"; id: string; params?: Record<string, number> }

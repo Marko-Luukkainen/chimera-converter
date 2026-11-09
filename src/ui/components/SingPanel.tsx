@@ -1,5 +1,6 @@
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store.ts";
-import { useSing, playDemo, stopSinging, soundingSyllable, sungNow, DEMO_SONGS } from "../singing.ts";
+import { useSing, playDemo, playSong, loadSong, songFromUrl, stopSinging, soundingSyllable, sungNow, DEMO_SONGS } from "../singing.ts";
 import { mouthWords } from "../mouthWords.ts";
 import { V } from "../colors.ts";
 import { Keys } from "./Keys.tsx";
@@ -50,6 +51,18 @@ function Lyrics() {
   const lang = useSing((s) => s.lang);
   const at = demo ? demoAt : -1;
   const done = demo ? demoAt : cursor;
+  // a long song scrolls inside the list (its height is capped in CSS): keep the syllable being
+  // sung, or the next one, in view, on the second row so the row before it stays readable
+  const list = useRef<HTMLDivElement>(null);
+  const active = demo ? demoAt : cursor;
+  useEffect(() => {
+    const box = list.current;
+    const el = box?.querySelector<HTMLElement>(".syl.now, .syl.next");
+    if (!box || !el) return;
+    const top = el.offsetTop, bottom = top + el.offsetHeight;
+    if (top >= box.scrollTop && bottom <= box.scrollTop + box.clientHeight) return;
+    box.scrollTo({ top: Math.max(0, top - el.offsetHeight - 6), behavior: demo ? "smooth" : "auto" });
+  }, [active, demo, syllables]);
   return (
     <div className="lyrics">
       <textarea
@@ -62,7 +75,7 @@ function Lyrics() {
         placeholder="Type the words to sing"
         title="Each note sings the next syllable. Hold a key while you press the next one to sing legato. A lone “-” between words holds a vowel over several notes; hyphens split a word your way (“ti-ger”)."
       />
-      <div className="syllables" role="group" aria-label="Syllables. Each note sings the marked one; choose another to start there.">
+      <div ref={list} className="syllables" role="group" aria-label="Syllables. Each note sings the marked one; choose another to start there.">
         {syllables.map((s, i) => (
           <span key={i} className={`syl-wrap${s.wordEnd ? " word-end" : ""}`}>
             <button
@@ -96,6 +109,8 @@ function SongControls() {
   const setArtic = useStore((s) => s.setArtic);
   const vibrato = useSing((s) => s.vibrato);
   const setVibrato = useSing((s) => s.setVibrato);
+  const transpose = useSing((s) => s.transpose);
+  const setTranspose = useSing((s) => s.setTranspose);
   return (
     <EncoderPages
       label="Song voice"
@@ -112,7 +127,11 @@ function SongControls() {
         },
         {
           name: "Tone",
-          encoders: [{ label: "Bright", value: source.brightness, min: 0, max: 1, onChange: (v) => setSource({ brightness: v }), format: (v) => ({ value: String(Math.round(v * 100)), unit: "%" }) }],
+          encoders: [
+            { label: "Bright", value: source.brightness, min: 0, max: 1, onChange: (v) => setSource({ brightness: v }), format: (v) => ({ value: String(Math.round(v * 100)), unit: "%" }) },
+            // a song file only: sent half a second ahead, so a change is heard within that
+            { label: "Transpose", value: transpose, min: -12, max: 12, onChange: (v) => setTranspose(Math.round(v)), format: (v) => ({ value: (v > 0 ? "+" : "") + Math.round(v), unit: "st" }) },
+          ],
         },
       ]}
     />
@@ -154,7 +173,55 @@ function DemoSongs() {
           {demo === s.name ? `Stop “${s.name}”` : s.name}
         </Chip>
       ))}
+      <SongFile />
     </div>
+  );
+}
+
+/** A melody file to sing (from the converter, or opened here); `?melody=<url>` loads one. */
+function SongFile() {
+  const body = useStore((s) => s.body);
+  const start = useStore((s) => s.start);
+  const demo = useSing((s) => s.demo);
+  const song = useSing((s) => s.song);
+  const [err, setErr] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    void songFromUrl().then((e) => e && setErr(e));
+  }, []);
+  const playing = !!song && demo === song.title;
+  return (
+    <>
+      <input
+        ref={input}
+        type="file"
+        accept=".json,application/json"
+        hidden
+        onChange={async (e) => {
+          const f = e.target.files?.[0];
+          if (!f) return;
+          try {
+            setErr(loadSong(JSON.parse(await f.text()), f.name.replace(/\.json$/i, "")));
+          } catch (x) {
+            setErr((x as Error).message);
+          }
+          e.target.value = "";
+        }}
+      />
+      <Chip onClick={() => input.current?.click()}>Open song…</Chip>
+      {song && (
+        <Chip
+          on={playing}
+          onClick={async () => {
+            if (playing) return stopSinging();
+            setErr(await playSong(body, start));
+          }}
+        >
+          {playing ? `Stop “${song.title}”` : `▶ ${song.title}`}
+        </Chip>
+      )}
+      {err && <span className="song-error" role="alert">{err}</span>}
+    </>
   );
 }
 

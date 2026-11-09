@@ -16,7 +16,7 @@ import { CreatureView } from "./components/CreatureView.tsx";
 import { creatureById } from "../wasm/engine.ts";
 import { BeatboxRight, BeatOverlay, beatInfo, beatSlots } from "./components/BeatboxPanel.tsx";
 import { SingRight, singInfo, singWords } from "./components/SingPanel.tsx";
-import { playDemo, DEMO_SONGS } from "./singing.ts";
+import { playDemo, playSong, useSing, DEMO_SONGS } from "./singing.ts";
 import type { Mode } from "./store.ts";
 import type { BodyName } from "../worklet/protocol.ts";
 import { BodyPad } from "./components/BodyPad.tsx";
@@ -148,7 +148,8 @@ function StartPrompt() {
         disabled={starting}
         onClick={async () => {
           // the demo waits for audio itself, so a stop meanwhile (body, mode) cancels it
-          if (mode === "sing") return void playDemo(DEMO_SONGS[0].name, useStore.getState().body, start);
+          // a loaded song file (from the converter) is the song to hear; else the first demo
+          if (mode === "sing") return void (useSing.getState().song ? playSong(useStore.getState().body, start) : playDemo(DEMO_SONGS[0].name, useStore.getState().body, start));
           await start();
           const first = creatureById(creature)?.calls[0];
           if (mode === "bestiary" && first) playCall(first.id);
@@ -227,6 +228,11 @@ export function App() {
 
 function Wall() {
   const mode = useStore((s) => s.mode);
+  // `?melody=<url>` opens Sing mode with that song file (the converter links here); after the
+  // first render, so nothing touches the engine at import
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has("melody")) useStore.getState().setMode("sing");
+  }, []);
   return (
     <div className={`app mode-${mode}`}>
       <TopBar />

@@ -197,6 +197,11 @@ export class AudioEngine {
     this.send({ type: "release", tag });
   }
 
+  /** Gestures whose plan time 0 is voice-clock time `at` (a long song streamed in pieces). */
+  scheduleAt(gestures: import("../wasm/types.ts").Gesture[], at: number): void {
+    this.send({ type: "schedule", gestures, segments: [], end: 0, id: ++this.speakId, replace: false, at });
+  }
+
   /** Gestures planned on the main thread, times relative to arrival + lead (live playing). */
   scheduleGestures(gestures: import("../wasm/types.ts").Gesture[], lead = 0.006): void {
     this.send({ type: "schedule", gestures, segments: [], end: 0, id: ++this.speakId, replace: false, lead });
@@ -249,8 +254,16 @@ export class AudioEngine {
         this.pendingCParams = null;
       }
     };
-    if (typeof requestAnimationFrame === "function") requestAnimationFrame(flush);
-    else setTimeout(flush, 16);
+    // on the next frame, or soon when there are no frames (a hidden window: a song sung live keeps
+    // hearing its settings)
+    let done = false;
+    const once = () => {
+      if (done) return;
+      done = true;
+      flush();
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(once);
+    setTimeout(once, 50);
   }
 }
 

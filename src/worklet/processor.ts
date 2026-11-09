@@ -136,7 +136,9 @@ class ChimeraProcessor extends AudioWorkletProcessor {
       case "schedule": {
         // planning happened on the main thread; the engine shifts the gestures onto its clock
         const n = writeGestures(this.mem, x.engine_records(h), m.gestures, MAX_GESTURES);
-        const off = x.engine_schedule(h, n, m.lead ?? 0.03, m.replace ? 1 : 0);
+        // `at`: plan time 0 at this voice-clock time (a song sent in pieces stays on one timeline)
+        const lead = m.at !== undefined ? m.at - x.engine_clock(h) : (m.lead ?? 0.03);
+        const off = x.engine_schedule(h, n, lead, m.replace ? 1 : 0);
         if (m.segments.length) this.post({ type: "planned", id: m.id, t0: off, end: m.end + off, segments: m.segments.map((s) => ({ ...s, t0: s.t0 + off, t1: s.t1 + off })) });
         break;
       }
