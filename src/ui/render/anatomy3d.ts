@@ -624,25 +624,30 @@ function buildRest(model: VoiceModel): Rest {
  * is how free each point is, 0 at the scalp, 1 at the tip).
  */
 function hair(head: Shape, lipTop: number, lipHalf: number, k: number): { moustache: Float32Array[]; mullet: { a: Float32Array; hang: Float32Array }[] } {
+  // a bushy walrus moustache: strands from under the nose, out over the upper lip and down past the
+  // mouth's corners, in three layers so it has volume from any side
   const moustache: Float32Array[] = [];
-  const N = 7, STEPS = 14;
+  const N = 10, STEPS = 18;
   for (const side of [1, -1]) {
-    for (let i = 0; i < N; i++) {
-      const u = i / (N - 1);
-      const z0 = side * (0.12 + 1.15 * u) * k;
-      const z1 = side * (lipHalf * (0.75 + 0.55 * u) + 0.2 * k);
-      const y0 = lipTop + (0.62 - 0.12 * u) * k;
-      const y1 = lipTop - (0.25 + 1.1 * u * u) * k;
-      const pts: number[] = [];
-      for (let j = 0; j <= STEPS; j++) {
-        const t = j / STEPS;
-        const z = z0 + (z1 - z0) * t;
-        const y = y0 + (y1 - y0) * Math.pow(t, 1.6);
-        const s = head.at(y);
-        if (!s) continue;
-        pts.push(frontX(s, z) + (0.18 + 0.32 * Math.sin(Math.PI * Math.min(1, t * 1.3))) * k, y, z);
+    for (const layer of [0, 1, 2]) {
+      for (let i = 0; i < N; i++) {
+        const u = (i + 0.33 * layer) / N;
+        const z0 = side * (0.1 + 1.3 * u) * k;
+        const z1 = side * (lipHalf * (0.85 + 0.35 * u) + 0.2 * k);
+        const y0 = lipTop + (0.85 - 0.2 * u) * k;
+        const y1 = lipTop - (0.9 + 2.3 * u * u) * k;
+        const pts: number[] = [];
+        for (let j = 0; j <= STEPS; j++) {
+          const t = j / STEPS;
+          const z = z0 + (z1 - z0) * Math.pow(t, 0.8);
+          const y = y0 + (y1 - y0) * Math.pow(t, 1.7);
+          const s = head.at(y);
+          if (!s) continue;
+          const puff = (0.35 + 0.25 * layer + 0.55 * Math.sin(Math.PI * Math.min(1, t * 1.15))) * k;
+          pts.push(frontX(s, z) + puff, y, z);
+        }
+        if (pts.length >= 6) moustache.push(new Float32Array(pts));
       }
-      if (pts.length >= 6) moustache.push(new Float32Array(pts));
     }
   }
 
@@ -652,8 +657,8 @@ function hair(head: Shape, lipTop: number, lipHalf: number, k: number): { mousta
   const step = 0.3 * k;
   for (const side of [1, -1]) {
     for (let i = 0; i < 9; i++) {
-      // from the side behind the ear round to the middle of the back
-      const th = Math.PI * (0.56 + (0.44 * i) / 8);
+      // round the back of the head only: a mullet's sides stay short
+      const th = Math.PI * (0.7 + (0.3 * i) / 8);
       if (side < 0 && i === 8) continue; // the middle strand once
       const ct = Math.pow(Math.abs(Math.cos(th)), 2 / PB), st = Math.pow(Math.sin(th), 2 / PB);
       const y0 = yTop - (1.2 + 2.2 * (1 - i / 8)) * k; // the side strands start lower, round the crown
@@ -902,7 +907,7 @@ export class Anatomy3D {
     }
     // ---- the moustache, and the mullet: a slow sway, and a buzz as loud as the voice
     const loud = tele ? Math.min(1, 4 * tele.t.outRms) : 0;
-    if (this.hair) for (const l of rest.moustache) B.line(l, l.length / 3, V.white, 1.15, { alpha: 0.85 });
+    if (this.hair) for (const l of rest.moustache) B.line(l, l.length / 3, V.white, 1.2, { alpha: 0.9 });
     if (this.hair) rest.mullet.forEach((m, si) => {
       const P = this.tmp.reset();
       const ph = 0.7 * si;
