@@ -264,6 +264,9 @@ export const useStore = create<State>((set, get) => ({
     return startPromise;
   },
   setBody: (b) => {
+    // a body without an anatomy keeps the current one (the presets and the body pad leave it out)
+    b = { ...b, model: b.model ?? get().body.model };
+    if (b.model === "classic" || b.model === undefined) delete b.model;
     session++;
     // the new voice starts without the old one's score: a sung note would hang
     if (get().mode === "sing") stopSinging();
@@ -273,7 +276,7 @@ export const useStore = create<State>((set, get) => ({
     set((s) => ({ body: b, source: { ...s.source, f0 } }));
     engine.setBody(b);
   },
-  previewBody: (b) => set({ body: b }),
+  previewBody: (b) => set((s) => ({ body: b.model || !s.body.model ? b : { ...b, model: s.body.model } })),
   setSource: (v) => {
     set((s) => ({ source: { ...s.source, ...v } }));
     engine.setSource(v);

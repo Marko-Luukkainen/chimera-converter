@@ -5,8 +5,10 @@
 use crate::js::{Json, fixed, pad_end, pad_start};
 use crate::repo_path;
 use chimera::airway::frequency::{find_peaks, transfer_function};
+use chimera::anatomy::contour;
 use chimera::anatomy::human::{
-    ArticKey, BODY_CHILD, BODY_FEMALE, BODY_MALE, HumanArtic, HumanBody, NEUTRAL, rest_tip,
+    ArticKey, BODY_CHILD, BODY_FEMALE, BODY_MALE, HumanArtic, HumanBody, NEUTRAL, TractModel,
+    rest_tip,
 };
 use chimera::math::{js_max, js_min, js_round, ln, pow};
 use chimera::phonetics::inventory::consonants as inventory;
@@ -17,6 +19,8 @@ use chimera::voice::human_airway::HumanAirway;
 
 const VOWEL_TABLE: &str = "crates/chimera/src/phonetics/vowelTargets.generated.json";
 const FI_VOWEL_TABLE: &str = "crates/chimera/src/phonetics/vowelTargets.fi.generated.json";
+const CONTOUR_VOWEL_TABLE: &str = "crates/chimera/src/phonetics/vowelTargets.contour.generated.json";
+const CONTOUR_FI_VOWEL_TABLE: &str = "crates/chimera/src/phonetics/vowelTargets.fi.contour.generated.json";
 const CONSONANT_TABLE: &str = "crates/chimera/src/phonetics/consonantTargets.generated.json";
 const BODIES: [(&str, HumanBody); 3] = [
     ("male", BODY_MALE),
@@ -45,6 +49,8 @@ fn round3(x: f64) -> f64 {
 
 /// tbX tbY jaw lipAp lipProt lipWidth root larynx curl
 const LO: [f64; 9] = [1.2, 5.0, 0.05, 0.12, 0.0, 0.0, -0.9, -1.3, 0.0];
+/// the contour anatomy's tongue body reaches further back (the MRI's circle centres go to 0.3 cm)
+const LO_CONTOUR: [f64; 9] = [0.2, 5.0, 0.05, 0.12, 0.0, 0.0, -0.9, -1.3, 0.0];
 const HI: [f64; 9] = [4.6, 8.8, 2.3, 2.0, 1.4, 1.0, 0.9, 1.3, 1.0];
 
 fn to_artic(p: &[f64]) -> HumanArtic {
@@ -87,12 +93,24 @@ fn formants(air: &mut HumanAirway, freqs: &[f64], a: &HumanArtic) -> (Vec<f64>, 
 }
 
 /// Articulatory vowel targets fitted to reference formants with the frequency-domain airway
-/// model. `calibrate vowels [male|female|child|all] [--fi] [--out file]`; `--fi` fits the Finnish
-/// vowel references into the Finnish table and leaves the main table alone.
+/// model. `calibrate vowels [male|female|child|all] [--fi] [--contour] [--out file]`; `--fi` fits
+/// the Finnish vowel references into the Finnish table and leaves the main table alone;
+/// `--contour` calibrates the MRI contour anatomy into its own tables.
 pub fn vowels(a: &[String]) -> Result<(), String> {
     let fi = a.iter().any(|x| x == "--fi");
-    let a: Vec<String> = a.iter().filter(|x| *x != "--fi").cloned().collect();
-    let (rest, out) = out_option(&a, if fi { FI_VOWEL_TABLE } else { VOWEL_TABLE })?;
+    let contour = a.iter().any(|x| x == "--contour");
+    let a: Vec<String> = a.iter().filter(|x| *x != "--fi" && *x != "--contour").cloned().collect();
+    let table = match (fi, contour) {
+        (false, false) => VOWEL_TABLE,
+        (true, false) => FI_VOWEL_TABLE,
+        (false, true) => CONTOUR_VOWEL_TABLE,
+        (true, true) => CONTOUR_FI_VOWEL_TABLE,
+    };
+    let (rest, out) = out_option(&a, table)?;
+    // the contour model is a fit to the MRI frames' guides and an extrapolation outside them: a
+    // soft wall from 5 mm outside the range the MRI covered keeps the fit's tongue body and root
+    // near it (the counting has no fully open vowel, so /ɑ/ needs some extrapolation)
+    let ranges = if contour { contour::model().guide_range.clone() } else { Vec::new() };
     let refs = if fi { FI_VOWELS } else { VOWELS };
     let which = rest.first().map(String::as_str).unwrap_or("all");
     let n = 700;
@@ -103,11 +121,27 @@ pub fn vowels(a: &[String]) -> Result<(), String> {
         Ok(text) => Json::parse(&text).map_err(|e| format!("{out}: {e}"))?,
         Err(_) => Json::Obj(Vec::new()),
     };
+    // Contour anatomy: more starts than the heuristic one, whose fit sometimes ended in a closure
+    // (female /i/, child /u/, once male /i/): the table's own posture for the vowel (so a rerun
+    // can only improve on it), the adult male's (this run's, or the table's) for the other
+    // bodies, and the heuristic start with the tongue body 4 mm lower.
+    let mut prev_x: std::collections::HashMap<(String, String), Vec<f64>> = std::collections::HashMap::new();
+    if contour && let Ok(text) = std::fs::read_to_string(&out) {
+        let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{out}: {e}"))?;
+        for (body, t) in v.as_object().into_iter().flatten() {
+            for (ipa, e) in t.as_object().into_iter().flatten() {
+                let a = &e["artic"];
+                let x: Vec<f64> = ["tbX", "tbY", "jaw", "lipAp", "lipProt", "lipWidth", "root", "larynx", "ttCurl"].iter().map(|k| a[*k].as_f64().unwrap_or(0.0)).collect();
+                prev_x.insert((body.clone(), ipa.clone()), x);
+            }
+        }
+    }
 
     for (bname, body) in BODIES {
         if which != "all" && which != bname {
             continue;
         }
+        let body = if contour { body.with_model(TractModel::Contour) } else { body };
         let mut air = HumanAirway::new(96000.0, body);
         let k = body.scale;
         let mut table: Vec<(String, Json)> = Vec::new();
@@ -135,6 +169,12 @@ pub fn vowels(a: &[String]) -> Result<(), String> {
             ];
             if vw.ipa == "ɯ" {
                 x0 = vec![2.6, 7.35, 0.25, 0.5, 0.1, 0.65, 0.4, 0.2, 0.0];
+            }
+            if contour {
+                // the MRI tongues sit ~0.4 cm further back (centre of the fitted circle) than the
+                // classic ones; their root guide is relative (0 where the body's position puts it)
+                x0[0] -= 0.4;
+                x0[6] = 0.0;
             }
             let jaw_prior = 0.2 + 1.5 * vw.height;
             let mut cost = |p: &[f64]| -> f64 {
@@ -177,6 +217,14 @@ pub fn vowels(a: &[String]) -> Result<(), String> {
                         + 0.03 * pow(js_max(0.0, (p[3] - ap_prior).abs() - 0.35), 2.0);
                 }
                 c += 0.002 * p[6] * p[6] + 0.006 * p[7] * p[7];
+                // tbX, tbY, root against the MRI's range (contour anatomy). Not the jaw: its
+                // kinematics are the classic model's, and its loadings on the tongue are small
+                for (j, pi) in [(1usize, 0usize), (2, 1), (3, 6)] {
+                    if let Some([lo, hi]) = ranges.get(j) {
+                        let out = js_max(0.0, lo - 0.5 - p[pi]) + js_max(0.0, p[pi] - hi - 0.5);
+                        c += 0.1 * out * out;
+                    }
+                }
                 // the tongue body near where the vowel's height and backness put it: many postures
                 // give the same formants, and without this the fit wandered (a schwa with the
                 // tongue as low as /ɑ/), making every transition through it needlessly long
@@ -187,7 +235,7 @@ pub fn vowels(a: &[String]) -> Result<(), String> {
                 c
             };
             let opts = |step: [f64; 9], max_iter: usize| NelderMeadOpts {
-                lo: Some(LO.to_vec()),
+                lo: Some(if contour { LO_CONTOUR } else { LO }.to_vec()),
                 hi: Some(HI.to_vec()),
                 step: Some(step.to_vec()),
                 max_iter: Some(max_iter),
@@ -198,6 +246,26 @@ pub fn vowels(a: &[String]) -> Result<(), String> {
                 &x0,
                 opts([0.4, 0.4, 0.3, 0.25, 0.3, 0.25, 0.3, 0.3, 0.2], 1800),
             );
+            if contour {
+                let mut starts: Vec<Vec<f64>> = Vec::new();
+                if let Some(x) = prev_x.get(&(bname.to_string(), vw.ipa.to_string())) {
+                    starts.push(x.clone());
+                }
+                if bname != "male"
+                    && let Some(x) = prev_x.get(&("male".to_string(), vw.ipa.to_string()))
+                {
+                    starts.push(x.clone());
+                }
+                let mut low = x0.clone();
+                low[1] -= 0.4;
+                starts.push(low);
+                for st in &starts {
+                    let nb = nelder_mead(&mut cost, st, opts([0.3, 0.3, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.1], 1800));
+                    if nb.fx < best.fx {
+                        best = nb;
+                    }
+                }
+            }
             // restart from the best point to escape shallow minima
             for _ in 0..2 {
                 let nb = nelder_mead(
@@ -208,6 +276,9 @@ pub fn vowels(a: &[String]) -> Result<(), String> {
                 if nb.fx < best.fx {
                     best = nb;
                 }
+            }
+            if contour {
+                prev_x.insert((bname.to_string(), vw.ipa.to_string()), best.x.clone());
             }
             let a = to_artic(&best.x);
             let (f, _) = formants(&mut air, &freqs, &a);

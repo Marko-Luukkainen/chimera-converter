@@ -107,7 +107,7 @@ class ChimeraProcessor extends AudioWorkletProcessor {
     const x = this.x, h = this.h;
     switch (m.type) {
       case "body":
-        x.engine_set_body(h, m.body.female, m.body.child, m.body.neanderthal ?? 0);
+        x.engine_set_body(h, m.body.female, m.body.child, m.body.neanderthal ?? 0, m.body.model === "contour" ? 1 : 0);
         this.postReady();
         break;
       case "artic": {

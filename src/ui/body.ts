@@ -2,10 +2,10 @@
  * The continuous body (see `BodyMix` in the engine): the page's twin of its weights, so the UI can
  * blend the few per-body things it keeps itself (default pitch, vowel chart, keyboard range).
  */
-import type { BodyMix } from "../wasm/types.ts";
+import type { BodyMix, TractModel } from "../wasm/types.ts";
 import type { BodyName } from "../worklet/protocol.ts";
 
-export type { BodyMix };
+export type { BodyMix, TractModel };
 
 /** the bodies calibrated against recordings; the Neanderthal borrows the adult male's tables */
 export type CalibratedBody = Exclude<BodyName, "neanderthal">;
@@ -48,11 +48,14 @@ export const calibrated = (n: BodyName): CalibratedBody => (n === "neanderthal" 
 /** How much of the Neanderthal this body is (0 for a modern human). */
 export const neanderthalShare = (b: BodyMix) => clamp01(b.neanderthal ?? 0);
 
+/** The anatomy a body is built by ("classic" when left out). */
+export const tractModel = (b: BodyMix): TractModel => b.model ?? "classic";
+
 export function sameBody(a: BodyMix | null | undefined, b: BodyMix | null | undefined): boolean {
-  return !!a && !!b && a.female === b.female && a.child === b.child && (a.neanderthal ?? 0) === (b.neanderthal ?? 0);
+  return !!a && !!b && a.female === b.female && a.child === b.child && (a.neanderthal ?? 0) === (b.neanderthal ?? 0) && tractModel(a) === tractModel(b);
 }
 
-export const bodyKey = (b: BodyMix) => `${b.female},${b.child},${b.neanderthal ?? 0}`;
+export const bodyKey = (b: BodyMix) => `${b.female},${b.child},${b.neanderthal ?? 0},${tractModel(b)}`;
 
 /**
  * A per-preset quantity blended by the body's weights (geometrically: pitches, frequencies). The

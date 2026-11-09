@@ -33,7 +33,8 @@ and the CLI) under a React UI. See the README.
   `CHIMERA_BLESS=1 cargo test --workspace --no-fail-fast`, run twice. Human-voice audio, plans
   (including the beat sounds' gestures and the beat player), the tract geometry and the human
   airway's transfer functions re-bless; see `crates/chimera/tests/golden/README.md` for the rest.
-- **`*.generated.json` tables are regenerated (`chimera calibrate`, `tools/gen-*`), never edited.**
+- **`*.generated.json` tables are regenerated (`chimera calibrate`, `chimera anatomy fit`,
+  `tools/gen-*`), never edited.**
   Vowel calibration isn't bit-reproducible, so rerun it only when the formants should move.
 - **`src/wasm/chimera.wasm` is a gitignored build product.** After a Rust change, `bun test tests`
   alone tests the old engine: use `bun run test`. Don't share a cargo `target/` between checkouts.

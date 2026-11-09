@@ -47,13 +47,19 @@ export interface HumanArtic {
 /**
  * A body between the presets (mirrors the engine's BodyMix): `female` from the adult male (0) to
  * the adult female (1), `child` from adult (0) to child (1), and `neanderthal` from a modern human
- * (0) to the Neanderthal (1; left out for a modern body, as the engine serializes it).
+ * (0) to the Neanderthal (1; left out for a modern body, as the engine serializes it). `model` is
+ * the anatomy that builds the tract: the hand-built one (left out) or the statistical contour
+ * model fitted to speech MRI.
  */
 export interface BodyMix {
   female: number;
   child: number;
   neanderthal?: number;
+  model?: TractModel;
 }
+
+/** The anatomy that builds the tract (the engine's `TractModel`). */
+export type TractModel = "classic" | "contour";
 
 export interface HumanBody {
   name: string;

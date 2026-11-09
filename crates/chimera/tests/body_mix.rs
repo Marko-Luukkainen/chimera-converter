@@ -1,7 +1,7 @@
 //! The continuous body: presets are exact, blends land between them (anatomy, calibrated
 //! targets, formants, pitch), and a blended voice plays.
 use chimera::airway::frequency::{find_peaks, transfer_function};
-use chimera::anatomy::human::{BODY_CHILD, BODY_FEMALE, BODY_MALE, BODY_NEANDERTHAL, BodyMix, BodyName, HumanArtic, NEUTRAL};
+use chimera::anatomy::human::{BODY_CHILD, BODY_FEMALE, BODY_MALE, BODY_NEANDERTHAL, BodyMix, BodyName, HumanArtic, NEUTRAL, TractModel};
 use chimera::engine::{Engine, default_f0};
 use chimera::phonetics::inventory::phoneme;
 use chimera::phonetics::planner::{PlanOptions, vowel_artic};
@@ -31,7 +31,7 @@ fn presets_are_exact_and_weights_sum_to_one() {
     }
     // the Neanderthal has no female or child axis either
     assert_eq!(BodyMix::with_neanderthal(0.7, 0.3, 1.0).preset(), Some(BodyName::Neanderthal));
-    assert_eq!(BodyMix::new(f64::NAN, 3.0), BodyMix { female: 0.0, child: 1.0, neanderthal: 0.0 });
+    assert_eq!(BodyMix::new(f64::NAN, 3.0), BodyMix { female: 0.0, child: 1.0, neanderthal: 0.0, model: TractModel::Classic });
     assert_eq!(BodyMix::with_neanderthal(0.0, 0.0, f64::NAN), BodyMix::MALE);
 }
 
@@ -40,7 +40,7 @@ fn deserializes_from_a_name_or_a_mix() {
     let o: PlanOptions = serde_json::from_str(r#"{"body":"female","t0":0}"#).unwrap();
     assert_eq!(o.body, BodyMix::FEMALE);
     let o: PlanOptions = serde_json::from_str(r#"{"body":{"female":0.25,"child":0.5},"t0":0}"#).unwrap();
-    assert_eq!(o.body, BodyMix { female: 0.25, child: 0.5, neanderthal: 0.0 });
+    assert_eq!(o.body, BodyMix { female: 0.25, child: 0.5, neanderthal: 0.0, model: TractModel::Classic });
     let o: PlanOptions = serde_json::from_str(r#"{"body":"neanderthal","t0":0}"#).unwrap();
     assert_eq!(o.body, BodyMix::NEANDERTHAL);
     let o: PlanOptions = serde_json::from_str(r#"{"body":{"neanderthal":0.5},"t0":0}"#).unwrap();

@@ -3,6 +3,7 @@
 //! `calibrate-*.ts`) with their arguments, defaults and printed summaries. Spectrograms of the
 //! WAVs: `bun tools/spectrogram.ts in.wav out.png [title] [maxFreq] [windowMs]`.
 
+mod anatomy;
 mod calibrate;
 mod compare;
 mod diagnose;
@@ -10,7 +11,7 @@ mod js;
 mod render;
 mod wav;
 
-use chimera::anatomy::human::{BODY_CHILD, BODY_FEMALE, BODY_MALE, BODY_NEANDERTHAL, BodyMix, HumanBody};
+use chimera::anatomy::human::{BODY_CHILD, BODY_FEMALE, BODY_MALE, BODY_NEANDERTHAL, BodyMix, HumanBody, TractModel};
 use std::process::ExitCode;
 
 const USAGE: &str = "\
@@ -29,9 +30,12 @@ usage: chimera <command> [args] [--float]
   diagnose       [outdir]
   compare csd    [csd-dir] [outdir] [--songs a|b|all|en001a,…] [--body female] [--jobs n]
                  [--against earlier/score.json]  (score.json: distance to the singer, and the verdict)
-  calibrate vowels     [male|female|child|all] [--fi] [--out file]
+  calibrate vowels     [male|female|child|all] [--fi] [--contour] [--out file]
   calibrate consonants [--out file]
+  anatomy fit    <contours.json> [--out file] [--frames file]
+                 (the MRI contour anatomy from tools/contour-model/extract.py's contours)
 
+A body name takes /contour for the MRI contour anatomy (female/contour).
 Output names are stems (<out>.wav). --float writes 32-bit float WAVs instead of 16-bit PCM.
 Calibration writes the tables the engine embeds, in crates/chimera/src/phonetics/.";
 
@@ -55,8 +59,12 @@ impl Ctx {
     }
 }
 
-/// The body for a name (`male`, `female`, `child`, `neanderthal`).
+/// The body for a name (`male`, `female`, `child`, `neanderthal`; `/contour` after it for the MRI
+/// contour anatomy, as in `female/contour`).
 pub fn body(name: &str) -> Result<HumanBody, String> {
+    if let Some(base) = name.strip_suffix("/contour") {
+        return Ok(body(base)?.with_model(TractModel::Contour));
+    }
     match name {
         "male" => Ok(BODY_MALE),
         "female" => Ok(BODY_FEMALE),
@@ -66,8 +74,11 @@ pub fn body(name: &str) -> Result<HumanBody, String> {
     }
 }
 
-/// The app's body mix for a body preset, as `src/ui/body.ts` PRESETS.
+/// The app's body mix for a body preset, as `src/ui/body.ts` PRESETS (`/contour` as in [`body`]).
 pub fn body_mix(name: &str) -> Result<BodyMix, String> {
+    if let Some(base) = name.strip_suffix("/contour") {
+        return Ok(body_mix(base)?.with_model(TractModel::Contour));
+    }
     match name {
         "male" => Ok(BodyMix::MALE),
         "female" => Ok(BodyMix::FEMALE),
@@ -116,6 +127,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         ["diagnose", ..] => diagnose::run(&ctx, &args[1..]),
         ["calibrate", "vowels", ..] => calibrate::vowels(&args[2..]),
         ["calibrate", "consonants", ..] => calibrate::consonants(&args[2..]),
+        ["anatomy", ..] => anatomy::run(&args[1..]),
         ["help" | "--help" | "-h", ..] => {
             println!("{USAGE}");
             Ok(())
