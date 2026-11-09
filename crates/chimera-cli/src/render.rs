@@ -3,7 +3,7 @@
 use crate::js::{fixed, num, pad_end, pad_start};
 use crate::{Ctx, FS, arg, body, body_mix, peak, repo_path, wav_name};
 use chimera::analysis::lpc::{FormantOpts, estimate_formants};
-use chimera::anatomy::human::{ArticKey, BodyMix, N_ARTIC};
+use chimera::anatomy::human::{ArticKey, ArticPatch, BodyMix, N_ARTIC};
 use chimera::analysis::pitch::{YinOpts, yin_pitch};
 use chimera::control::beat_player::BeatPlayer;
 use chimera::control::score::Gesture;
@@ -496,8 +496,29 @@ fn render_tracked(v: &mut HumanVoice, out: &mut [f32], artic: bool, tele: bool) 
     Ok((frames, rec))
 }
 
-/// A melody from a JSON file: `{"bpm", "lyrics", "notes": [[midi, beats], ...], "vibrato"?, "lang"?}`
-/// (`"lang": "fi"` for Finnish lyrics).
+/// A melody's optional `"voice"`: source settings over the singing defaults and a posture the
+/// articulators hold between gestures, e.g. kargyraa throat singing:
+/// `{"source": {"falseFolds": 0.9, "tension": 0.8, "pressure": 12}, "artic": {"ventricular": 0.8}}`.
+/// `source` takes any `SourcePatch` field (camelCase); `artic` any articulator by name.
+fn apply_voice_style(v: &mut HumanVoice, style: &serde_json::Value) -> Result<(), String> {
+    if let Some(src) = style.get("source") {
+        let p: SourcePatch = serde_json::from_value(src.clone()).map_err(|e| format!("voice.source: {e}"))?;
+        v.set_source(&p);
+    }
+    if let Some(obj) = style.get("artic") {
+        let obj = obj.as_object().ok_or("voice.artic must be an object")?;
+        let mut patch = ArticPatch::default();
+        for (name, x) in obj {
+            let i = ArticKey::NAMES.iter().position(|n| n == name).ok_or_else(|| format!("voice.artic: no articulator {name}"))?;
+            patch.set(ArticKey::ALL[i], x.as_f64().ok_or_else(|| format!("voice.artic.{name} must be a number"))?);
+        }
+        v.set_articulation(&patch, None);
+    }
+    Ok(())
+}
+
+/// A melody from a JSON file: `{"bpm", "lyrics", "notes": [[midi, beats], ...], "vibrato"?, "lang"?, "voice"?}`
+/// (`"lang": "fi"` for Finnish lyrics; `"voice"` for a singing style, see `apply_voice_style`).
 /// One lyric syllable per sounding note; a note with midi <= 0 is a rest, which splits the
 /// melody into phrases planned separately on one voice.
 /// `render notes <in.json> <out> [body] [--artic tracks.json] [--tele voice.tele]`: `--artic` also
@@ -555,6 +576,9 @@ pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         tension: Some(0.55),
         ..Default::default()
     });
+    if let Some(style) = j.get("voice") {
+        apply_voice_style(&mut v, style)?;
+    }
     let (mut t, mut k, mut end) = (t0, 0usize, 0.0f64);
     let mut phrase: Vec<SungNote> = Vec::new();
     let mut start = t;

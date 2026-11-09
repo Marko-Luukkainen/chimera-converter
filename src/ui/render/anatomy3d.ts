@@ -217,6 +217,10 @@ interface Rest {
   jaw: Group[];
   /** the chin's midline outline (rest pose): part of the midsagittal section */
   chin: Float32Array;
+  /** the throat singer's walrus moustache (drawn only when the renderer's `hair` is on) */
+  moustache: Float32Array[];
+  /** the mullet's strands, drawn each frame so they sway (`hang` 0 at the scalp … 1 at the tip) */
+  mullet: { a: Float32Array; hang: Float32Array }[];
   eyes: V3[];
   eyeR: number;
 }
@@ -605,10 +609,91 @@ function buildRest(model: VoiceModel): Rest {
   const loFront = P(6.98, 0).x, loDepth = 4.0 * k, loHalf = 2.5 * k;
   group(jaw, V.blue, 1.0, 0.8, (L) => teeth(L, loFront, loDepth, loHalf, LOWER_TEETH, (u) => (7.75 + 0.45 * Math.pow(u, 1.5)) * k, -1));
 
+  const { moustache, mullet } = hair(head, lipTop, lipHalf, k);
+
   // eyes: the 2D view draws one on the midline; here they sit either side of the nose
   const eyeC = B(6.15, 15.35);
   const center = new THREE.Vector3(0.3 * k, (head.y0 + head.y1) / 2, 0);
-  return { model, head, condyle, lipHalf, center, shell, fixed, jaw, chin, eyes: [[eyeC.x, eyeC.y, 3.15 * k], [eyeC.x, eyeC.y, -3.15 * k]], eyeR: 1.05 * k };
+  return { model, head, condyle, lipHalf, center, shell, fixed, jaw, chin, moustache, mullet, eyes: [[eyeC.x, eyeC.y, 3.15 * k], [eyeC.x, eyeC.y, -3.15 * k]], eyeR: 1.05 * k };
+}
+
+/**
+ * The old singer's hair (the throat-singing show): a drooping walrus moustache over the upper lip,
+ * and a mullet, short on top and long down the back of the neck. The moustache is fixed to the
+ * skull; the mullet's strands are drawn each frame so they can sway and buzz with the voice (`hang`
+ * is how free each point is, 0 at the scalp, 1 at the tip).
+ */
+function hair(head: Shape, lipTop: number, lipHalf: number, k: number): { moustache: Float32Array[]; mullet: { a: Float32Array; hang: Float32Array }[] } {
+  const moustache: Float32Array[] = [];
+  const N = 7, STEPS = 14;
+  for (const side of [1, -1]) {
+    for (let i = 0; i < N; i++) {
+      const u = i / (N - 1);
+      const z0 = side * (0.12 + 1.15 * u) * k;
+      const z1 = side * (lipHalf * (0.75 + 0.55 * u) + 0.2 * k);
+      const y0 = lipTop + (0.62 - 0.12 * u) * k;
+      const y1 = lipTop - (0.25 + 1.1 * u * u) * k;
+      const pts: number[] = [];
+      for (let j = 0; j <= STEPS; j++) {
+        const t = j / STEPS;
+        const z = z0 + (z1 - z0) * t;
+        const y = y0 + (y1 - y0) * Math.pow(t, 1.6);
+        const s = head.at(y);
+        if (!s) continue;
+        pts.push(frontX(s, z) + (0.18 + 0.32 * Math.sin(Math.PI * Math.min(1, t * 1.3))) * k, y, z);
+      }
+      if (pts.length >= 6) moustache.push(new Float32Array(pts));
+    }
+  }
+
+  const mullet: { a: Float32Array; hang: Float32Array }[] = [];
+  const yTop = head.y1 - 0.6 * k;
+  const yEnd = head.y0 + 0.4 * k;
+  const step = 0.3 * k;
+  for (const side of [1, -1]) {
+    for (let i = 0; i < 9; i++) {
+      // from the side behind the ear round to the middle of the back
+      const th = Math.PI * (0.56 + (0.44 * i) / 8);
+      if (side < 0 && i === 8) continue; // the middle strand once
+      const ct = Math.pow(Math.abs(Math.cos(th)), 2 / PB), st = Math.pow(Math.sin(th), 2 / PB);
+      const y0 = yTop - (1.2 + 2.2 * (1 - i / 8)) * k; // the side strands start lower, round the crown
+      const pts: number[] = [];
+      let hx = Infinity, hz = 0;
+      for (let y = y0; y >= yEnd; y -= step) {
+        const s = head.at(y);
+        const drop = (y0 - y) / Math.max(1e-6, y0 - yEnd);
+        if (s) {
+          const x = s.xw - (s.xw - s.Bk) * ct, z = side * s.W * st;
+          const rx = x - s.xw, n = Math.hypot(rx, z) || 1;
+          const off = (0.2 + 0.9 * drop) * k;
+          // hair falls: past the back of the skull it hangs, it doesn't follow the neck forward
+          hx = Math.min(hx, x + (off * rx) / n);
+          hz = side * Math.max(Math.abs(hz) * 0.985, Math.abs(z + (off * z) / n));
+        }
+        if (!Number.isFinite(hx)) continue;
+        pts.push(hx, y, hz);
+      }
+      // a curl out at the tip, over the shoulders
+      if (pts.length >= 6) {
+        const n = pts.length;
+        pts.push(pts[n - 3] - 0.5 * k, pts[n - 2] - 0.25 * k, pts[n - 1] * 1.08);
+        const a = new Float32Array(pts);
+        const hang = new Float32Array(a.length / 3);
+        for (let j = 0; j < hang.length; j++) hang[j] = Math.pow(j / (hang.length - 1), 1.5);
+        mullet.push({ a, hang });
+      }
+    }
+  }
+  // short on top: a few stubby tufts over the crown and forehead
+  for (let i = 0; i < 6; i++) {
+    const s = head.at(yTop);
+    if (!s) break;
+    const x = s.Bk + (s.F - s.Bk) * (0.3 + 0.1 * i);
+    const z = (i % 2 ? 1 : -1) * (0.3 + 0.35 * i) * k * 0.6;
+    const a = new Float32Array([x, yTop, z, x + 0.3 * k, yTop + 0.75 * k, z * 1.1]);
+    mullet.push({ a, hang: new Float32Array([0, 0.25]) });
+  }
+  return { moustache, mullet };
 }
 
 // ------------------------------------------------------------------ the renderer
@@ -644,6 +729,8 @@ export class Anatomy3D {
   /** which way the turned home view shows the face: 1 to the right, −1 to the left (a duet's
    *  second head, so the two sing towards each other) */
   facing: 1 | -1 = 1;
+  /** draw the throat singer's moustache and mullet (a show's `"hair": true`) */
+  hair = false;
   private clock = 0;
   private readonly gaze = new Gaze();
   /** brows, lids, cheeks and the head's nods, from the voice (the view updates it) */
@@ -813,6 +900,20 @@ export class Anatomy3D {
       }
       B.poly(P, V.blueDim, 0.85, { alpha: 0.42 });
     }
+    // ---- the moustache, and the mullet: a slow sway, and a buzz as loud as the voice
+    const loud = tele ? Math.min(1, 4 * tele.t.outRms) : 0;
+    if (this.hair) for (const l of rest.moustache) B.line(l, l.length / 3, V.white, 1.15, { alpha: 0.85 });
+    if (this.hair) rest.mullet.forEach((m, si) => {
+      const P = this.tmp.reset();
+      const ph = 0.7 * si;
+      const swayZ = 0.35 * k * Math.sin(1.6 * this.clock + ph), swayX = 0.2 * k * Math.sin(1.1 * this.clock + ph + 1);
+      for (let i = 0; i < m.hang.length; i++) {
+        const h = m.hang[i];
+        const buzz = 0.12 * k * loud * Math.sin(41 * this.clock + 1.9 * i + ph);
+        P.p(m.a[3 * i] + h * (swayX + buzz), m.a[3 * i + 1], m.a[3 * i + 2] + h * (swayZ + buzz));
+      }
+      B.poly(P, V.white, 1.0, { alpha: 0.55 + 0.3 * loud });
+    });
 
     // ---- the midsagittal section, as the 2D view draws it
     const G = buildProfile(model, f, a);

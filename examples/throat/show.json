@@ -1,0 +1,7 @@
+{
+  "title": "Ukko ja takatukka · kurkkulaulu · physically simulated · no samples",
+  "audio": "ukko.mp3",
+  "bpm": 120,
+  "downbeat": 0.3,
+  "voices": [{ "name": "Ukko", "tele": "ukko.tele", "melody": "ukko-ja-takatukka.json", "hair": true }]
+}

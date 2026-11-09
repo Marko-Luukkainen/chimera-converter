@@ -40,13 +40,20 @@ pub struct VoiceSource {
     /// the model can, so there is little room to darken and a lot to brighten.
     #[serde(default = "default_brightness")]
     pub brightness: f64,
+    /// 0..1 false-fold (ventricular) vibration, as in kargyraa throat singing: the false folds
+    /// close on every other glottal cycle, so alternate pulses come out weak and late and a
+    /// subharmonic an octave below f0 carries the pitch. Unlike roughness it adds no jitter or
+    /// shimmer, so the harmonics stay sharp enough to sing overtones over. 0 (the default) leaves
+    /// the voice as it was.
+    #[serde(default)]
+    pub false_folds: f64,
 }
 
 fn default_brightness() -> f64 {
     DEFAULT_SOURCE.brightness
 }
 
-pub const DEFAULT_SOURCE: VoiceSource = VoiceSource { f0: 110.0, glide: 0.06, pressure: 8.0, breathiness: 0.15, tension: 0.5, fry: 0.0, roughness: 0.1, vibrato_depth: 0.0, vibrato_rate: 6.0, drift: 5.0, voiced: true, brightness: 0.25 };
+pub const DEFAULT_SOURCE: VoiceSource = VoiceSource { f0: 110.0, glide: 0.06, pressure: 8.0, breathiness: 0.15, tension: 0.5, fry: 0.0, roughness: 0.1, vibrato_depth: 0.0, vibrato_rate: 6.0, drift: 5.0, voiced: true, brightness: 0.25, false_folds: 0.0 };
 
 /// `Partial<VoiceSource>`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -76,6 +83,8 @@ pub struct SourcePatch {
     pub voiced: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub brightness: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub false_folds: Option<f64>,
 }
 
 impl SourcePatch {
@@ -87,13 +96,13 @@ impl SourcePatch {
         macro_rules! set {
             ($($f:ident),*) => { $( if let Some(x) = self.$f { s.$f = x; } )* };
         }
-        set!(f0, glide, pressure, breathiness, tension, fry, roughness, vibrato_depth, vibrato_rate, drift, voiced, brightness);
+        set!(f0, glide, pressure, breathiness, tension, fry, roughness, vibrato_depth, vibrato_rate, drift, voiced, brightness, false_folds);
     }
     pub fn merge(&mut self, o: &SourcePatch) {
         macro_rules! set {
             ($($f:ident),*) => { $( if o.$f.is_some() { self.$f = o.$f; } )* };
         }
-        set!(f0, glide, pressure, breathiness, tension, fry, roughness, vibrato_depth, vibrato_rate, drift, voiced, brightness);
+        set!(f0, glide, pressure, breathiness, tension, fry, roughness, vibrato_depth, vibrato_rate, drift, voiced, brightness, false_folds);
     }
     pub fn from_source(s: &VoiceSource) -> Self {
         SourcePatch {
@@ -109,6 +118,7 @@ impl SourcePatch {
             drift: Some(s.drift),
             voiced: Some(s.voiced),
             brightness: Some(s.brightness),
+            false_folds: Some(s.false_folds),
         }
     }
 }
@@ -333,7 +343,10 @@ impl HumanVoice {
         // under the clinical threshold (MDVP: 1.04 %).
         g.jitter = 0.0021 + 0.0245 * s.roughness;
         g.shimmer = 0.02 + 0.22 * s.roughness;
-        g.diplophonia = if s.roughness > 0.5 { (s.roughness - 0.5) * 1.4 } else { 0.0 };
+        let rough_doubling = if s.roughness > 0.5 { (s.roughness - 0.5) * 1.4 } else { 0.0 };
+        // false folds damp every other pulse harder than a rough voice ever does (up to 1.8:
+        // alternate pulses at ~37 % amplitude, the period alternating ±14 %)
+        g.diplophonia = js_max(rough_doubling, 1.8 * clamp(s.false_folds, 0.0, 1.0));
         g.vibrato_depth = s.vibrato_depth;
         g.vibrato_rate = s.vibrato_rate;
         g.drift = s.drift;

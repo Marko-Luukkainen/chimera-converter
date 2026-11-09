@@ -51,7 +51,7 @@ interface ShowFile {
   bpm?: number;
   downbeat?: number;
   spell?: Record<string, string>;
-  voices: { name: string; tele: string; melody?: string }[];
+  voices: { name: string; tele: string; melody?: string; hair?: boolean }[];
 }
 
 interface Loaded {
@@ -225,7 +225,7 @@ export function DuetPage(props: { id: string }) {
           useLive && live ? (
             <LiveHead name={loaded.voices[0].name} words={loaded.voices[0].words} live={live} />
           ) : (
-            loaded.voices.map((v, i) => <Head key={i} name={v.name} track={v.track} words={v.words} show={loaded.show} transport={transport} facing={i > 0 && i === loaded.voices.length - 1 ? -1 : 1} />)
+            loaded.voices.map((v, i) => <Head key={i} name={v.name} track={v.track} words={v.words} show={loaded.show} transport={transport} facing={i > 0 && i === loaded.voices.length - 1 ? -1 : 1} hair={loaded.show.voices[i]?.hair} />)
           )
         ) : (
           <p className="duet-msg">Loading the song…</p>
@@ -286,7 +286,7 @@ function LiveHead(props: { name: string; words: SungWords | null; live: LiveShow
 }
 
 /** one voice's head; the last of several turns to face the others */
-function Head(props: { name: string; track: TeleTrack; words: SungWords | null; show: ShowFile; transport: Transport; facing: 1 | -1 }) {
+function Head(props: { name: string; track: TeleTrack; words: SungWords | null; show: ShowFile; transport: Transport; facing: 1 | -1; hair?: boolean }) {
   const { track, show, transport, words } = props;
   const feedRef = useRef<HeadFeed | null>(null);
   // the syllable at the mouth, written on the side the face looks to
@@ -304,6 +304,7 @@ function Head(props: { name: string; track: TeleTrack; words: SungWords | null; 
       view: VIEW,
       maxDpr: 1.5,
       facing: props.facing,
+      hair: props.hair,
       frame: () => {
         const t = transport.time();
         const i = track.indexAt(t);
