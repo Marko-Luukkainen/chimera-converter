@@ -671,7 +671,7 @@ function hair(head: Shape, lipTop: number, lipHalf: number, k: number): { mousta
       for (let i = 0; i < N; i++) {
         const u = (i + 0.33 * layer) / N;
         const z0 = side * (0.1 + 1.3 * u) * k;
-        const z1 = side * (lipHalf * (0.85 + 0.35 * u) + 0.2 * k);
+        const z1 = side * (lipHalf * (0.95 + 0.5 * u) + 0.35 * k);
         const y0 = lipTop + (0.85 - 0.2 * u) * k;
         const y1 = lipTop - (0.9 + 2.3 * u * u) * k;
         const pts: number[] = [];
@@ -695,8 +695,8 @@ function hair(head: Shape, lipTop: number, lipHalf: number, k: number): { mousta
   const step = 0.3 * k;
   for (const side of [1, -1]) {
     for (let i = 0; i < 9; i++) {
-      // round the back of the head only: a mullet's sides stay short
-      const th = Math.PI * (0.7 + (0.3 * i) / 8);
+      // from the side behind the ear round to the middle of the back
+      const th = Math.PI * (0.56 + (0.44 * i) / 8);
       if (side < 0 && i === 8) continue; // the middle strand once
       const ct = Math.pow(Math.abs(Math.cos(th)), 2 / PB), st = Math.pow(Math.sin(th), 2 / PB);
       const y0 = yTop - (1.2 + 2.2 * (1 - i / 8)) * k; // the side strands start lower, round the crown
@@ -963,7 +963,7 @@ export class Anatomy3D {
     }
     // ---- the moustache, and the mullet: a slow sway, and a buzz as loud as the voice
     const loud = tele ? Math.min(1, 4 * tele.t.outRms) : 0;
-    if (this.hair) for (const l of rest.moustache) B.line(l, l.length / 3, V.white, 1.2, { alpha: 0.9 });
+    if (this.hair) for (const l of rest.moustache) B.line(l, l.length / 3, V.white, 1.4, { alpha: 0.95, hot: true });
     if (this.hair) rest.mullet.forEach((m, si) => {
       const P = this.tmp.reset();
       const ph = 0.7 * si;
