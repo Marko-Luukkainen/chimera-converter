@@ -17,9 +17,12 @@ function Refresh-Path {
   $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:USERPROFILE\.bun\bin;$env:USERPROFILE\.cargo\bin"
 }
 function Have([string]$cmd) { return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
-function Winget([string]$id, [string[]]$extra = @()) {
-  if (-not (Have "winget")) { Write-Host "   winget puuttuu: asenna $id käsin" -ForegroundColor Yellow; return }
-  & winget install -e --id $id --accept-package-agreements --accept-source-agreements @extra
+# not named "winget": PowerShell function names ignore case, so a function Winget calling winget
+# called itself until the call depth overflowed
+function Install-WithWinget([string]$id, [string[]]$extra = @()) {
+  $wg = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $wg) { Write-Host "   winget puuttuu: asenna $id käsin" -ForegroundColor Yellow; return }
+  & $wg.Source install -e --id $id --accept-package-agreements --accept-source-agreements @extra
 }
 function Have-Python312 {
   if (Have "py") { & py -3.12 -c "import sys" 2>$null; if ($LASTEXITCODE -eq 0) { return $true } }
@@ -40,16 +43,16 @@ $env:CHIMERA_REPO = $Repo
 
 Step "1/5 Tarvittavat ohjelmat"
 Refresh-Path
-if (-not (Have-Python312)) { Write-Host "   asennetaan Python 3.12"; Winget "Python.Python.3.12" @("--scope", "user"); Refresh-Path } else { Write-Host "   Python 3.12 löytyi" }
+if (-not (Have-Python312)) { Write-Host "   asennetaan Python 3.12"; Install-WithWinget "Python.Python.3.12" @("--scope", "user"); Refresh-Path } else { Write-Host "   Python 3.12 löytyi" }
 if (-not (Have "bun")) {
-  Write-Host "   asennetaan Bun"; Winget "Oven-sh.Bun"; Refresh-Path
+  Write-Host "   asennetaan Bun"; Install-WithWinget "Oven-sh.Bun"; Refresh-Path
   if (-not (Have "bun")) { powershell -NoProfile -ExecutionPolicy Bypass -c "irm bun.sh/install.ps1 | iex"; Refresh-Path }
 } else { Write-Host "   Bun löytyi" }
 if (-not (Have-Msvc)) {
   Write-Host "   asennetaan Visual Studion C++-työkalut (Rust tarvitsee niiden linkkerin; noin 3 Gt, Windows kysyy lupaa)"
-  Winget "Microsoft.VisualStudio.2022.BuildTools" @("--override", "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended")
+  Install-WithWinget "Microsoft.VisualStudio.2022.BuildTools" @("--override", "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended")
 } else { Write-Host "   C++-työkalut löytyivät" }
-if (-not (Have "rustup")) { Write-Host "   asennetaan Rust"; Winget "Rustlang.Rustup"; Refresh-Path } else { Write-Host "   Rust löytyi" }
+if (-not (Have "rustup")) { Write-Host "   asennetaan Rust"; Install-WithWinget "Rustlang.Rustup"; Refresh-Path } else { Write-Host "   Rust löytyi" }
 if (Have "rustup") {
   & rustup default stable 2>$null | Out-Null
   & rustup target add wasm32-unknown-unknown
