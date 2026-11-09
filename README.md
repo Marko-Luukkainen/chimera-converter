@@ -1,4 +1,28 @@
-# CHIMERA
+# chimera-converter
+
+Converter for Chimera singer. Convert Finnish and English language
+
+This repository is [CHIMERA](https://github.com/jamesondh/chimera-vocal-synth) by Jameson Hodge
+(MIT) with additions:
+
+- **Finnish speech and singing**: rule G2P, first-syllable stress, vowel quantity and geminates,
+  Finnish vowel table, Finnish R/S/T, Finnish lyrics in Sing mode and on the duet page.
+- **Converter** ([tools/chimera-convert](tools/chimera-convert/README.md)): a sung recording
+  (wav/mp3) and its lyrics become a Chimera melody file: voice separation, pitch and note
+  tracking, lyrics alignment, a check of what counts as singing, and a piano-roll editor app.
+- **Live songs**: Sing mode plays a converted song with live voice controls; the duet page
+  (`?show=<id>`) sings it live with a voice panel (character, body, vibrato, tone, grit).
+- **Moving the setup to another Windows machine**: `siirra_toiselle_koneelle.bat` and
+  `tools/transfer` (in Finnish).
+
+No recordings, conversions or shows are committed (`out/`, `public/shows/`): they are often
+covers of songs nobody here has the rights to.
+
+The original README follows.
+
+---
+
+## CHIMERA
 
 A physical-modeling voice synthesizer in the browser. Every sound comes from a simulated
 airway (lungs, vocal folds or syrinx, a branched vocal tract, lips, nose), not from samples.
