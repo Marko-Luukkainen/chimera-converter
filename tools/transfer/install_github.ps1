@@ -1,13 +1,13 @@
-﻿# Asentaa GitHubista haetun Chimeran (suomen tuki) ja muuntimen käyttökuntoon. Ajetaan
-# asenna_githubista.bat:lla, joka ensin hakee (tai päivittää) repon.
+﻿# Installs Chimera (with Finnish support) and the converter from a GitHub checkout. Run by
+# install_from_github.bat, which clones (or updates) the repo first.
 #
-#  1. tarvittavat ohjelmat wingetillä: Python 3.12, Bun, Rust ja Visual Studion C++-työkalut
-#     (moottori käännetään lähdekoodista, joten Rust tarvitaan)
-#  2. Chimeran JavaScript-paketit ja moottori (chimera.wasm) sekä komentoriviohjelma (chimera.exe)
-#  3. muuntimen sovellus ja Python-ympäristö (torch CUDA:lla, jos koneessa on NVIDIA)
-#  4. työpöydän pikakuvakkeet ja tarkistus
-# Ajetaan uudelleen päivitykseen: jo asennetut osat ohitetaan, käännökset tehdään uudestaan.
-# Loki: <repo>\asennus.log
+#  1. the tools, with winget: Python 3.12, Bun, Rust and the Visual Studio C++ build tools
+#     (the engine is built from source, so Rust is needed)
+#  2. Chimera's JavaScript packages, the engine (chimera.wasm) and the CLI (chimera.exe)
+#  3. the converter app and its Python environment (torch with CUDA on an NVIDIA GPU)
+#  4. desktop shortcuts and a check
+# Run again to update: what is installed is skipped, the builds are redone.
+# Log: <repo>\install.log
 param([string]$Repo = "")
 $ErrorActionPreference = "Continue"
 if (-not $Repo) { $Repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot) }
@@ -21,7 +21,7 @@ function Have([string]$cmd) { return [bool](Get-Command $cmd -ErrorAction Silent
 # called itself until the call depth overflowed
 function Install-WithWinget([string]$id, [string[]]$extra = @()) {
   $wg = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-  if (-not $wg) { Write-Host "   winget puuttuu: asenna $id käsin" -ForegroundColor Yellow; return }
+  if (-not $wg) { Write-Host "   winget is missing: install $id by hand" -ForegroundColor Yellow; return }
   & $wg.Source install -e --id $id --accept-package-agreements --accept-source-agreements @extra
 }
 function Have-Python312 {
@@ -36,49 +36,49 @@ function Have-Msvc {
 }
 function Step([string]$text) { Write-Host ""; Write-Host $text -ForegroundColor Cyan }
 
-Start-Transcript -Path (Join-Path $Repo "asennus.log") -Append | Out-Null
-Write-Host "CHIMERA + muunnin: asennus kansioon $Repo" -ForegroundColor Cyan
+Start-Transcript -Path (Join-Path $Repo "install.log") -Append | Out-Null
+Write-Host "CHIMERA + converter: installing in $Repo" -ForegroundColor Cyan
 [Environment]::SetEnvironmentVariable("CHIMERA_REPO", $Repo, "User")
 $env:CHIMERA_REPO = $Repo
 
-Step "1/5 Tarvittavat ohjelmat"
+Step "1/5 Tools"
 Refresh-Path
-if (-not (Have-Python312)) { Write-Host "   asennetaan Python 3.12"; Install-WithWinget "Python.Python.3.12" @("--scope", "user"); Refresh-Path } else { Write-Host "   Python 3.12 löytyi" }
+if (-not (Have-Python312)) { Write-Host "   installing Python 3.12"; Install-WithWinget "Python.Python.3.12" @("--scope", "user"); Refresh-Path } else { Write-Host "   Python 3.12 found" }
 if (-not (Have "bun")) {
-  Write-Host "   asennetaan Bun"; Install-WithWinget "Oven-sh.Bun"; Refresh-Path
+  Write-Host "   installing Bun"; Install-WithWinget "Oven-sh.Bun"; Refresh-Path
   if (-not (Have "bun")) { powershell -NoProfile -ExecutionPolicy Bypass -c "irm bun.sh/install.ps1 | iex"; Refresh-Path }
-} else { Write-Host "   Bun löytyi" }
+} else { Write-Host "   Bun found" }
 if (-not (Have-Msvc)) {
-  Write-Host "   asennetaan Visual Studion C++-työkalut (Rust tarvitsee niiden linkkerin; noin 3 Gt, Windows kysyy lupaa)"
+  Write-Host "   installing the Visual Studio C++ build tools (Rust needs their linker; about 3 GB, Windows asks for permission)"
   Install-WithWinget "Microsoft.VisualStudio.2022.BuildTools" @("--override", "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended")
-} else { Write-Host "   C++-työkalut löytyivät" }
-if (-not (Have "rustup")) { Write-Host "   asennetaan Rust"; Install-WithWinget "Rustlang.Rustup"; Refresh-Path } else { Write-Host "   Rust löytyi" }
+} else { Write-Host "   C++ build tools found" }
+if (-not (Have "rustup")) { Write-Host "   installing Rust"; Install-WithWinget "Rustlang.Rustup"; Refresh-Path } else { Write-Host "   Rust found" }
 if (Have "rustup") {
   & rustup default stable 2>$null | Out-Null
   & rustup target add wasm32-unknown-unknown
 }
 
-Step "2/5 Chimera: JavaScript-paketit, moottori ja komentoriviohjelma (ensimmäinen käännös kestää useita minuutteja)"
+Step "2/5 Chimera: JavaScript packages, engine and CLI (the first build takes several minutes)"
 Push-Location $Repo
-if (Have "bun") { & bun install } else { Write-Host "   Bun puuttuu" -ForegroundColor Red }
+if (Have "bun") { & bun install } else { Write-Host "   Bun is missing" -ForegroundColor Red }
 if ((Have "cargo") -and (Have "bun")) {
   & bun run wasm
   & cargo build --release -p chimera-cli
-} else { Write-Host "   Rust puuttuu: moottoria ei voitu kääntää" -ForegroundColor Red }
+} else { Write-Host "   Rust is missing: the engine could not be built" -ForegroundColor Red }
 Pop-Location
 
-Step "3/5 Muuntimen sovellus"
+Step "3/5 Converter app"
 Push-Location (Join-Path $conv "app")
 if (Have "bun") { & bun install; & bun run build }
 Pop-Location
 
-Step "4/5 Muuntimen Python-ympäristö (torch lataa noin 2,5 Gt)"
+Step "4/5 Converter Python environment (torch downloads about 2.5 GB)"
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $conv "scripts\install.ps1")
 
-Step "5/5 Pikakuvakkeet ja tarkistus"
+Step "5/5 Shortcuts and check"
 $desk = [Environment]::GetFolderPath("Desktop")
 $sh = New-Object -ComObject WScript.Shell
-foreach ($l in @(@("Chimera", (Join-Path $Repo "start_chimera.bat")), @("Chimera-muunnin", (Join-Path $conv "scripts\start_app.bat")))) {
+foreach ($l in @(@("Chimera", (Join-Path $Repo "start_chimera.bat")), @("Chimera Converter", (Join-Path $conv "scripts\start_app.bat")))) {
   $lnk = $sh.CreateShortcut((Join-Path $desk ($l[0] + ".lnk")))
   $lnk.TargetPath = $l[1]
   $lnk.WorkingDirectory = Split-Path -Parent $l[1]
@@ -87,17 +87,17 @@ foreach ($l in @(@("Chimera", (Join-Path $Repo "start_chimera.bat")), @("Chimera
 $ok = $true
 function Check([string]$what, [bool]$good, [string]$fix) {
   if ($good) { Write-Host "   OK       $what" -ForegroundColor Green }
-  else { Write-Host "   PUUTTUU  $what - $fix" -ForegroundColor Red; $script:ok = $false }
+  else { Write-Host "   MISSING  $what - $fix" -ForegroundColor Red; $script:ok = $false }
 }
-Check "Chimeran moottori (src\wasm\chimera.wasm)" (Test-Path (Join-Path $Repo "src\wasm\chimera.wasm")) "Rustin tai C++-työkalujen asennus jäi kesken: käynnistä kone uudelleen ja aja asennus uudestaan"
-Check "chimera.exe (laulattaminen muuntimessa)" (Test-Path (Join-Path $Repo "target\release\chimera.exe")) "sama kuin yllä"
-Check "Chimeran paketit" (Test-Path (Join-Path $Repo "node_modules\vite")) "aja 'bun install' kansiossa $Repo"
-Check "muuntimen sovellus" (Test-Path (Join-Path $conv "app\dist\index.html")) "aja 'bun install' ja 'bun run build' kansiossa $conv\app"
-Check "muuntimen Python" (Test-Path (Join-Path $conv ".venv\Scripts\python.exe")) "katso $conv\out\install.log"
+Check "Chimera engine (src\wasm\chimera.wasm)" (Test-Path (Join-Path $Repo "src\wasm\chimera.wasm")) "Rust or the C++ build tools didn't finish installing: restart the machine and run the installer again"
+Check "chimera.exe (Sing with Chimera in the converter)" (Test-Path (Join-Path $Repo "target\release\chimera.exe")) "as above"
+Check "Chimera packages" (Test-Path (Join-Path $Repo "node_modules\vite")) "run 'bun install' in $Repo"
+Check "converter app" (Test-Path (Join-Path $conv "app\dist\index.html")) "run 'bun install' and 'bun run build' in $conv\app"
+Check "converter Python" (Test-Path (Join-Path $conv ".venv\Scripts\python.exe")) "see $conv\out\install.log"
 $gpu = $false
 if (Have "nvidia-smi") { & nvidia-smi -L 2>$null | Out-Null; $gpu = ($LASTEXITCODE -eq 0) }
-Write-Host ("   GPU: " + $(if ($gpu) { "NVIDIA löytyi (muunnos nopea)" } else { "ei NVIDIA-näytönohjainta: muunnos toimii, mutta hitaammin" }))
+Write-Host ("   GPU: " + $(if ($gpu) { "NVIDIA found (fast conversion)" } else { "no NVIDIA GPU: the converter works, but slower" }))
 Stop-Transcript | Out-Null
 Write-Host ""
-if ($ok) { Write-Host "Valmis. Työpöydällä: Chimera ja Chimera-muunnin." -ForegroundColor Green }
-else { Write-Host "Asennus jäi vajaaksi, katso yllä. Loki: $Repo\asennus.log" -ForegroundColor Yellow }
+if ($ok) { Write-Host "Done. On the desktop: Chimera and Chimera Converter." -ForegroundColor Green }
+else { Write-Host "The install is incomplete, see above. Log: $Repo\install.log" -ForegroundColor Yellow }

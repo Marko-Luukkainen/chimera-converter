@@ -401,7 +401,7 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
         with open(d / f"original{ext}", "wb") as f:
             shutil.copyfileobj(audio.file, f)
         (d / "lyrics.txt").write_text(lyrics, encoding="utf-8")
-        s = {"id": sid, "title": title or Path(audio.filename or "laulu").stem, "created": time.time(),
+        s = {"id": sid, "title": title or Path(audio.filename or "song").stem, "created": time.time(),
              "status": "queued", "stage": "Queued", "progress": 0.0, "error": None,
              "lang": lang_used, "lang_requested": lang, "detection": det,
              "options": {"separate": separate, "align": align, "review": review}, "files": {"original": f"original{ext}"},

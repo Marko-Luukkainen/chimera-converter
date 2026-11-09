@@ -12,16 +12,16 @@ This repository is [CHIMERA](https://github.com/jamesondh/chimera-vocal-synth) b
   tracking, lyrics alignment, a check of what counts as singing, and a piano-roll editor app.
 - **Live songs**: Sing mode plays a converted song with live voice controls; the duet page
   (`?show=<id>`) sings it live with a voice panel (character, body, vibrato, tone, grit).
-- **Moving the setup to another Windows machine**: `siirra_toiselle_koneelle.bat` and
-  `tools/transfer` (in Finnish).
+- **Windows install**: `install_from_github.bat` (from this repository) and
+  `transfer_to_another_pc.bat` (a working copy with its songs, to another machine).
 
-## Install on Windows (asennus)
+## Install on Windows
 
-Download [`asenna_githubista.bat`](asenna_githubista.bat) (Raw → save) and double-click it. It
+Download [`install_from_github.bat`](install_from_github.bat) (Raw → save) and double-click it. It
 installs Git, Python 3.12, Bun, Rust and the Visual Studio C++ build tools with winget where
 missing, clones this repository to `%USERPROFILE%\chimera-converter`, builds the engine
 (`chimera.wasm`) and the CLI (`chimera.exe`), the converter app and its Python environment (torch
-with CUDA on an NVIDIA GPU, else the CPU build), and puts "Chimera" and "Chimera-muunnin" on the
+with CUDA on an NVIDIA GPU, else the CPU build), and puts "Chimera" and "Chimera Converter" on the
 desktop. The first run downloads 6–8 GB and takes 20–40 minutes; run it again to update.
 
 No recordings, conversions or shows are committed (`out/`, `public/shows/`): they are often

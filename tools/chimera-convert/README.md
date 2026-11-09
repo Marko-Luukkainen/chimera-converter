@@ -1,220 +1,217 @@
 # chimera-convert
 
-Muuntaa lauluäänitteen (wav, mp3, flac …) ja sen sanoituksen CHIMERAn melodiatiedostoksi, jonka
-`chimera render notes` laulaa.
+Turns a sung recording (wav, mp3, flac …) and its lyrics into a CHIMERA melody file, which
+`chimera render notes` sings.
 
 ```
-äänite ─► [Demucs: laulu erilleen] ─► sävelkorkeus (torchcrepe) ─► nuotit (viritystä seuraava HMM) ─┐
-                                    └► sanoituksen kohdistus (MMS, vain laulettuihin kohtiin) ─────┤
-sanoitus ─► sanat ─► tavut (suomi: säännöt, englanti: Chimeran oma jako) ───────────────────────────┴► tavut nuoteille ─► .json
+recording ─► [Demucs: voice apart] ─► pitch (torchcrepe) ─► notes (HMM that follows the tuning) ─┐
+                                    └► lyrics alignment (MMS, sung parts only) ─────────────────────┤
+lyrics ─► words ─► syllables (Finnish: rules, English: Chimera's own split) ─────────────────────────┴► syllables on notes ─► .json
 ```
 
-1. **Laulu erilleen** (oletuksena päällä, `--separate`): Demucs htdemucs erottaa lauluraidan
-   taustoista. Ilman sitä sävelkäyrä lasketaan koko miksauksesta ja tulos on selvästi huonompi.
-2. **Sävelkorkeus** 10 ms välein: torchcrepe näytönohjaimella (varalla librosan pYIN).
-3. **Nuotit ennen sanoja** (`transcribe.py`): laulajan viritys seurataan liukuvasti (vibrato
-   keskiarvoistetaan pois), joten laulaja, joka valuu kappaleen aikana 40 senttiä alas, pysyy
-   samoilla nuoteilla. Nuotit löydetään piilo-Markov-mallilla (tila jokaiselle puolisävelelle ja
-   hiljaisuudelle): nuotti pysyy vibraton ja lyhyiden konsonanttikatkojen yli, eikä liukuma tai
-   heitto muutu omaksi nuotikseen. Toistettu sama sävel jaetaan katkon tai voimakkuuden notkahduksen
-   kohdalta.
-4. **Tavut**: suomi tavutetaan oikeinkirjoitussäännöillä, englanti **Chimeran omalla jaolla**.
-5. **Kohdistus**: monikielinen MMS-kohdistusmalli kertoo suunnilleen, milloin kunkin tavun vokaali
-   alkaa. Vokaalit sallitaan vain kohtiin, joissa lauletaan, joten kohdistus ei karkaa soolo-osiin.
-6. **Tavut nuoteille** (`assign.py`): koko kappale ratkaistaan kerralla dynaamisella ohjelmoinnilla.
-   Tavu alkaa nuotin alusta (tai saman sävelen jakokohdasta), mahdollisimman lähellä mallin aikaa;
-   tavun ja seuraavan välissä olevat nuotit ovat melismaa; hengityksen jälkeinen laulu, jota mikään
-   tavu ei tarvitse (taustalaulu, huudahdukset), jätetään pois; rivinvaihto suosii hengitystä.
-   Tavu, jolle ei löydy laulua, merkitään editorissa tarkistettavaksi.
+1. **Voice apart** (on by default, `--separate`): Demucs htdemucs separates the vocal track from
+   the backing. Without it the pitch is tracked on the whole mix and the result is clearly worse.
+2. **Pitch** every 10 ms: torchcrepe on the GPU (librosa's pYIN as the fallback).
+3. **Notes before words** (`transcribe.py`): the singer's tuning is followed over the song (vibrato
+   averaged out), so a singer drifting 40 cents flat stays on the same notes. Notes are found with
+   a hidden Markov model (one state per semitone plus silence): a note holds through vibrato and
+   short consonant gaps, and a glide or a flip doesn't become a note of its own. A repeated note is
+   split at a gap or a dip in loudness.
+4. **What counts as singing** (`transcribe.Detection`): louder than a level threshold and either a
+   clear pitch or, on a voice track, loud enough alone (rough, shouted or distorted singing has no
+   clear pitch). The app shows it and lets you set it before the notes are made.
+5. **Syllables**: Finnish by its spelling rules, English by **Chimera's own split**.
+6. **Alignment**: the multilingual MMS forced aligner says roughly when each syllable's vowel
+   starts. Vowels are only allowed where someone sings, so the alignment can't drift into a solo.
+7. **Syllables on notes** (`assign.py`): the whole song is solved at once by dynamic programming.
+   A syllable starts at a note start (or a split of a repeated note), as near the model's time as
+   possible; notes between one syllable and the next are its melisma; singing after a breath that
+   no syllable needs (backing vocals, shouts) is dropped; a line break prefers a breath. A gap
+   shorter than the hold time is a consonant and the syllable is held over it. A syllable with no
+   singing to sit on is marked for checking in the editor.
 
-Tulos käyttää tempoa 60 bpm, jolloin yksi isku on yksi sekunti ja nuottien kestot ovat suoraan
-äänitteen ajoitus.
+The output uses 60 bpm, so one beat is one second and the note lengths are the recording's timing.
 
-**Kieli** luetaan sanoituksesta (suomi tai englanti). Jos sanoista ei voi päätellä kieltä
-varmasti (liian vähän sanoja, molempia kieliä, tai sanat näyttävät muulta kieleltä kuten
-ruotsilta), muunnin kysyy sitä: sovellus näyttää kielivalinnan, ja komentorivi pysähtyy ja pyytää
-`--lang fi` tai `--lang en`. Kielen voi aina valita myös itse.
+**Language** is read from the lyrics (Finnish or English). When the words don't tell (too few,
+both languages, or they look like another language such as Swedish), the converter asks: the app
+shows a language choice, and the command line stops and asks for `--lang fi` or `--lang en`. You
+can always choose it yourself.
 
-## Sovellus
+## The app
 
-`scripts\start_app.bat` käynnistää muuntimen sovelluksen osoitteeseen http://127.0.0.1:5320 ja
-avaa sen selaimeen. Sulje ikkuna lopettaaksesi.
+`scripts\start_app.bat` starts the converter app at http://127.0.0.1:5320 and opens it in the
+browser. Close the window to stop it.
 
-Käyttöliittymä on englanniksi.
+1. **New song**: drop a recording and type the lyrics. The language is detected as you type
+   (Language: Detect); if it is unsure, choose Finnish or English before converting. Choose
+   "Separate the voice" for a finished song with its backing.
+2. **Conversion** shows its progress (the first run downloads the models). First the audio is
+   analysed (separation, pitch, the alignment model), then it stops at **What counts as singing**:
+   the level and the pitch clarity over the whole song, with a green strip for what counts as
+   singing (grey: loud but not counted). Click the picture to listen there. Adjust if needed:
+   - *Level threshold*: singing is louder than this (dB below the loudest moment). Lower it when
+     quiet singing is missed.
+   - *Pitch clarity needed*: how clear a pitch must be. Lower it for breathy or reverberant singing.
+   - *Rough voice counts*: loud singing without a clear pitch (shouts, rasp, distortion) counts as
+     singing. Separated voices (or a voice recorded alone) only; keep it at 0 on a full mix.
+   - *Hold syllables over gaps*: a syllable is held over a gap shorter than this (words don't come
+     out short), but the singer still breathes at a line break.
+   **Make the notes →** makes the notes with these (a few seconds; the analysis is kept). The
+   editor's **Singing…** comes back here; **Back to the notes** returns without changing anything.
+   To skip this step, untick "Let me check what counts as singing" when adding the song.
+3. **Editor**: a piano roll with the sung pitch (orange), syllable notes (blue) and melismas
+   (pink). Drag a note up or down to change its pitch and by its edges to change its timing;
+   Shift+drag moves it. Keys: S split, Delete merge with the previous, [ ] move a syllable to the
+   previous or next note, ↑↓ pitch, Space play, Ctrl+Z undo. The language can be changed next to
+   the title (the notes are placed again). Orange dashed notes are syllables that found no singing:
+   "N to check ▸" in the status bar jumps to the next one.
+4. **Open in Chimera (live)** opens the song in Chimera's own Sing mode (Chimera must be running:
+   `start_chimera.bat`). There it plays on Chimera's engine in real time, and the voice controls
+   work while it sings: Vibrato, Rate, Breathy and Ring (*Song* page), Bright and Transpose
+   (*Tone* page), Pressed, Rough and Fry (Voice panel) and the body in the top bar
+   (Male/Female/Child; a change restarts the song). Vibrato and Transpose take effect within about
+   half a second, the others at once. The voice comes in at once (the recording's intro is
+   skipped) and keeps singing in a background window.
+5. **Sing with Chimera** renders the current notes to a file, with its progress shown; the playback
+   source "Recording" / "Voice" / "Chimera" switches what you compare.
+6. **Duet show…** makes a show for Chimera's duet page (`public\shows\<id>`, not in git): start
+   Chimera (`start_chimera.bat`) and open `http://127.0.0.1:5317/?show=<id>`. The show page has
+   two modes: **Recorded** plays the finished render, **Live voice** sings the song on Chimera's
+   engine in the page itself over the backing (the recording without its voice, made when the
+   voice was separated). The **Voice settings** panel picks the singer's character (Natural,
+   Soft, Pop, Rock, Opera, Crooner, Folk) and body (Male/Female/Child or between), and sets
+   vibrato, rate, transpose, looseness, bright, breathy, ring, pressed, rough, fry, growl, power
+   and the voice and band levels, all heard at once. **+ Save voice** keeps a voice by name, and
+   the show remembers the last voice it was sung with.
+   **Download melody** gives the `render notes` file.
 
-1. **New song**: pudota äänite, kirjoita sanat. Kieli tunnistetaan kirjoittaessa (Language:
-   Detect); jos se ei ole varma, valitse Finnish tai English ennen muuntamista. Valitse
-   "Separate the voice", jos äänite on valmis kappale taustoineen.
-2. **Muunnos** etenee palkissa (ensimmäinen kerta lataa mallit). Ensin ääni analysoidaan
-   (erotus, sävelkorkeus, sanojen kohdistusmalli), sitten pysähdytään vaiheeseen **What counts as
-   singing**: kuvassa laulun voimakkuus ja sävelen selkeys koko kappaleen ajalta, ja vihreä nauha
-   näyttää, mikä lasketaan lauluksi (harmaa = kova mutta ei laskettu). Klikkaa kuvaa kuunnellaksesi
-   kohdan. Säädä tarvittaessa:
-   - *Level threshold*: laulu on tätä kovempaa (dB kovimmasta). Laske, jos hiljaista laulua jää pois.
-   - *Pitch clarity needed*: kuinka selvä sävelen pitää olla. Laske henkäilevälle tai kaikuiselle laululle.
-   - *Rough voice counts*: kova laulu ilman selvää säveltä (huuto, räkä, särö) lasketaan lauluksi.
-     Vain erotetulle laululle (tai pelkälle laulunauhalle); valmiissa miksauksessa pidä 0:ssa.
-   - *Hold syllables over gaps*: tätä lyhyemmän katkon yli tavu pidetään soimassa (sanat eivät
-     jää lyhyiksi), mutta rivin vaihdossa laulaja hengittää.
-   **Make the notes →** tekee nuotit näillä (muutama sekunti, analyysiä ei tehdä uudelleen).
-   Editorin **Singing…** palaa tähän vaiheeseen; **Back to the notes** palaa muuttamatta mitään.
-   Jos haluat ohittaa vaiheen, poista uutta kappaletta lisätessä valinta "Let me check what counts
-   as singing".
-3. **Editori**: piano roll, jossa laulettu sävelkäyrä (oranssi), tavunuotit (sininen) ja melismat
-   (pinkki). Vedä nuottia ylös/alas sävelen vaihtamiseksi ja reunoista ajoituksen muuttamiseksi,
-   Shift+veto siirtää. Näppäimet: S jaa, Delete yhdistä edelliseen, [ ] siirrä tavu edelliseen tai
-   seuraavaan nuottiin, ↑↓ sävel, välilyönti soittaa, Ctrl+Z kumoa. Kielen voi vaihtaa otsikon
-   vierestä (Language; nuotit sijoitetaan silloin uudelleen). Oranssit katkoviivalliset nuotit
-   ovat tavuja, joille ei löytynyt laulua: tilarivin "N to check ▸" hyppää seuraavaan.
-4. **Open in Chimera (live)** avaa kappaleen Chimeran omaan Sing-tilaan (Chimeran pitää olla
-   käynnissä: `start_chimera.bat`). Siellä kappale soi Chimeran moottorissa reaaliajassa, ja
-   äänen säätimet toimivat soiton aikana: *Song*-sivun Vibrato, Rate, Breathy ja Ring, *Tone*-sivun
-   Bright ja Transpose, Voice-paneelin Pressed, Rough ja Fry sekä yläpalkin ääni (Male/Female/Child,
-   vaihto aloittaa kappaleen alusta). Vibrato ja Transpose vaikuttavat noin puolen sekunnin
-   viiveellä, muut heti. Laulu alkaa heti (äänitteen intron hiljaisuus jätetään pois) ja jatkuu,
-   vaikka ikkuna olisi taustalla.
-5. **Sing with Chimera** renderöi nykyiset nuotit tiedostoksi; toiston lähde
-   "Recording"/"Voice"/"Chimera" vaihtaa vertailtavaa.
-6. **Duet show…** tekee show'n Chimeran duettisivulle (`public\shows\<tunnus>`, ei gitissä):
-   avaa Chimera (`start_chimera.bat`) ja osoite `http://127.0.0.1:5317/?show=<tunnus>`.
-   Show-sivulla on kaksi tilaa: **Recorded** soittaa valmiin renderöinnin, **Live voice** laulaa
-   kappaleen Chimeran moottorilla sivulla itsessään taustan päälle (tausta = äänite ilman laulua,
-   tehdään kun äänestä on erotettu laulu). **Voice settings** -paneelissa valitaan laulajan
-   luonne (Natural, Soft, Pop, Rock, Opera, Crooner, Folk) ja keho (Male/Female/Child tai väliltä),
-   ja säädetään vibrato, nopeus, transponointi, väljyys, kirkkaus, henkäisy, ring, puristus,
-   karheus, fry, murina, voima sekä laulun ja taustan voimakkuus; kaikki kuuluvat heti.
-   **+ Save voice** tallentaa oman äänen nimellä, ja show muistaa viimeksi käytetyn äänen.
-   **Download melody** antaa `render notes` -tiedoston.
+Songs are kept in `out\sessions\` (not in git). The UI's source is in `app\` (React + Vite, in
+Chimera's look); `app\README.md` says how to rebuild it.
 
-Kappaleet tallentuvat kansioon `out\sessions\` (ei gitissä). Käyttöliittymän lähdekoodi on
-kansiossa `app\` (React + Vite, Chimeran tyylillä); `app\README.md` kertoo, miten sen voi kääntää
-uudelleen.
+## Moving the setup to another Windows machine
 
-## Siirto toiselle koneelle
+From GitHub: run [`install_from_github.bat`](../../install_from_github.bat) on the new machine.
 
-Vanhalla koneella: kaksoisnapsauta Chimeran kansiossa `siirra_toiselle_koneelle.bat`. Se kysyy
-kohteen (USB-tikku, verkkojako tai kansio) ja tekee sinne kansion `ChimeraSiirto`: Chimera kaikkine
-paikallisine muutoksineen ja committeineen, valmiiksi käännetty moottori ja `chimera.exe`, muunnin
-sovelluksineen sekä halutessa mallit (noin 1,3 Gt) ja omat kappaleet.
+From a working copy (keeps local, uncommitted changes and your songs): run
+`transfer_to_another_pc.bat` in the Chimera folder. It asks for a destination (USB stick, network
+share or folder) and writes a `ChimeraTransfer` folder there: Chimera with its local changes and
+commits, the built engine and `chimera.exe`, the converter with its app and, if you want, the
+models (about 1.3 GB) and your songs. On the new machine run `ChimeraTransfer\INSTALL.bat`: it
+installs what is missing with winget (Python 3.12, Bun), makes the converter's Python environment
+(torch with CUDA on an NVIDIA GPU, else the CPU build), installs Chimera's packages and puts
+"Chimera" and "Chimera Converter" on the desktop. Rust is only needed to change the engine
+(`INSTALL.bat -Dev`).
 
-Uudella koneella: kaksoisnapsauta `ChimeraSiirto\ASENNA.bat`. Se asentaa puuttuvat ohjelmat
-wingetillä (Python 3.12, Bun), tekee muuntimen Python-ympäristön (torch CUDA:lla, jos koneessa on
-NVIDIA, muuten CPU-versio), asentaa Chimeran paketit ja tekee työpöydälle kuvakkeet "Chimera" ja
-"Chimera-muunnin". Rustia ei tarvita, ellei moottoria aiota muokata (`ASENNA.bat -Dev`).
+## Install (Windows, NVIDIA)
 
-## Asennus (Windows, NVIDIA)
-
-Python 3.12 (koneellasi asennettuna) tai 3.11; Demucsin riippuvuuksilla ei välttämättä ole vielä paketteja 3.13:lle.
-Muunnin on Chimeran repossa kansiossa `tools\chimera-convert`.
+Python 3.12 or 3.11 (Demucs's dependencies may not have 3.13 packages yet). The converter lives in
+the Chimera repo at `tools\chimera-convert`.
 
 ```powershell
-cd $env:USERPROFILE\chimera-vocal-synth\tools\chimera-convert
+cd <chimera repo>\tools\chimera-convert
 py -3.12 -m venv .venv
 .venv\Scripts\activate
 pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
 pip install -r requirements.txt
 ```
 
-Sama onnistuu ajamalla `scripts\install.bat`, joka myös tarkistaa asennuksen ja ajaa testit.
+`scripts\install.bat` does the same (the CPU build of torch when there is no NVIDIA GPU), checks
+the install and runs the tests.
 
-Tarkista, että näytönohjain löytyy: `python -c "import torch; print(torch.cuda.is_available())"`.
+Check that the GPU is found: `python -c "import torch; print(torch.cuda.is_available())"`.
 
-Englantia varten Chimeran CLI käännetään kerran repon juuressa (sen tavujako luetaan siltä):
+For English, build Chimera's CLI once at the repo root (the syllable split comes from it):
 
 ```powershell
-cd $env:USERPROFILE\chimera-vocal-synth
+cd <chimera repo>
 cargo build --release -p chimera-cli
 ```
 
-Ensimmäinen ajo lataa mallit: MMS-kohdistusmalli noin 1,2 Gt (Hugging Face) ja Demucs noin
-80 Mt. Ne tallentuvat välimuistiin.
+The first run downloads the models: the MMS aligner, about 1.2 GB (Hugging Face), and Demucs,
+about 80 MB. They are cached.
 
-## Käyttö
+## Command line
 
-Tallenna muunnokset kansioon `out\`: se on rajattu gitin ulkopuolelle (`.git\info\exclude`),
-joten äänitteistä tehdyt tiedostot eivät päädy repoon.
+Keep conversions in `out\`: it is outside git, so files made from recordings stay out of the repo.
 
 ```powershell
-# a cappella tai valmiiksi erotettu lauluraita
-python -m chimera_convert laulu.wav sanat.txt -o out\laulu.json
+# a cappella, or a vocal track already separated
+python -m chimera_convert song.wav lyrics.txt -o out\song.json
 
-# valmis kappale taustoineen: laulu erotetaan ensin
-python -m chimera_convert kappale.mp3 sanat.txt --separate --plot -o out\kappale.json
+# a finished song with its backing: the voice is separated first
+python -m chimera_convert song.mp3 lyrics.txt --separate --plot -o out\song.json
 
-# englanti; Chimera löytyy oletuksena kotikansiosta (%USERPROFILE%\chimera-vocal-synth),
-# muualta --chimera POLKU
-python -m chimera_convert song.mp3 lyrics.txt --lang en --separate -o out\song.json   # kieli valittu itse
+# English, language chosen; Chimera is found from the repo this sits in, $CHIMERA_REPO or --chimera PATH
+python -m chimera_convert song.mp3 lyrics.txt --lang en --separate -o out\song.json
 ```
 
-Sitten Chimerassa (repon juuressa):
+Then in Chimera (at the repo root):
 
 ```powershell
 .\target\release\chimera.exe render notes tools\chimera-convert\out\song.json song-chimera female
 ```
 
-### Tulosteet
+### Outputs
 
-| Tiedosto | Sisältö |
+| File | Contents |
 |---|---|
-| `laulu.json` | Chimeran melodiatiedosto: `bpm`, `lyrics`, `notes: [[midi, iskuja], …]` (midi 0 on tauko), `t0`, `vibrato` sekä tiedoksi `source`, `lang`, `body` (Chimera ei lue näitä kolmea). |
-| `laulu.csv` | Nuotit tarkistusta varten: alku, loppu, sävel, tavu. |
-| `laulu.png` | (`--plot`) Laulettu sävelkäyrä, nuotit ja tavut samassa kuvassa. Nopein tapa nähdä, osuiko kohdistus. |
-| `laulu.vocals.wav` | (`--separate`) Erotettu lauluraita. Kuuntele, jos tulos näyttää oudolta. |
+| `song.json` | Chimera's melody file: `bpm`, `lyrics`, `notes: [[midi, beats], …]` (midi 0 is a rest), `t0`, `vibrato`, `lang`, and for reference `source` and `body`. |
+| `song.csv` | The notes for checking: start, end, pitch, syllable. |
+| `song.png` | (`--plot`) The sung pitch, the notes and the syllables in one picture: the quickest way to see whether the alignment landed. |
+| `song.vocals.wav` | (`--separate`) The separated vocal track. Listen to it when the result looks odd. |
 
-### Valinnat
+### Options
 
-| Valinta | Oletus | Merkitys |
+| Option | Default | Meaning |
 |---|---|---|
-| `--lang auto\|fi\|en` | `auto` | sanoituksen kieli; `auto` lukee sen sanoista ja pysähtyy kysymään, jos se ei ole varma |
-| `--separate` | pois | erota laulu taustoista ensin |
-| `--align mms\|none` | `mms` | `none`: ei kohdistusta, tavut nuoteille järjestyksessä (kevyt, mutta virheherkkä) |
-| `--pitch crepe\|pyin` | crepe | sävelkorkeuden seuranta |
-| `--transpose N` | 0 | puolisävelaskelia, esim. `-12` naisen laulu miesäänelle |
-| `--keep-cents` | pois | säilytä laulettu sävel sentin tarkkuudella pyöristämisen sijaan |
-| `--min-note S` | 0,10 | lyhin sävel omana nuottinaan; lyhyemmät (liukumat, vibraton heitot) sulautetaan |
-| `--rest S` | 0,25 | lyhin hiljaisuus, joka kirjoitetaan taukona |
-| `--vibrato C` | 35 | tiedostoon kirjoitettava vibraton syvyys sentteinä |
+| `--lang auto\|fi\|en` | `auto` | the lyrics' language; `auto` reads it from the words and stops to ask when unsure |
+| `--separate` | off | separate the voice from the backing first |
+| `--voice-only` | off | the recording is a voice alone (implied by `--separate`) |
+| `--gate DB`, `--clarity X`, `--rough X`, `--hold S` | suggested | what counts as singing (see the app's step 2) |
+| `--align mms\|none` | `mms` | `none`: no alignment, syllables on notes in order (light, but fragile) |
+| `--pitch crepe\|pyin` | crepe | pitch tracker |
+| `--transpose N` | 0 | semitones, e.g. `-12` for a female part sung by a male voice |
+| `--keep-cents` | off | keep the sung pitch to the cent instead of the nearest note |
+| `--vibrato C` | 35 | vibrato depth written to the file, in cents |
 
-## Sanoitustiedosto
+## The lyrics file
 
-- UTF-8-tekstiä. Rivinvaihto, pilkku ja piste merkitsevät hengitystä.
-- Kirjoita sanat **täsmälleen niin kuin ne lauletaan**: kertosäkeen toistot auki, ei "×2"-merkintöjä,
-  ei puhuttuja välihuutoja, joita äänitteessä ei ole.
-- Suomen yhdyssanat tavutetaan säännöillä oikein vain, jos raja on merkitty: `kesä-yö`,
-  `rakkaus-laulu`. Myös muun tavutuksen voi pakottaa tavuviivalla.
-- Melismoja ei tarvitse merkitä; muunnin päättelee ne melodiasta.
-- Yksi kieli per kappale. Jos sanoissa on sekä suomea että englantia, muunnin kysyy, kummalla
-  kielellä kappale lauletaan (toisen kielen sanat lausutaan silloin valitun kielen säännöin).
+- UTF-8 text. Line breaks, commas and full stops mark breaths.
+- Write the words **exactly as they are sung**: choruses written out, no "×2", no spoken shouts
+  that aren't in the recording.
+- Finnish compounds are split right only when the boundary is marked: `kesä-yö`,
+  `rakkaus-laulu`. A hyphen also forces any other split.
+- Melismas need no marking; the converter reads them from the melody.
+- One language per song. When the lyrics mix Finnish and English, the converter asks which one
+  the song is sung in (the other language's words are then said by its rules).
 
-## Rajoitukset
+## Limits
 
-- Suomi soi `render notes` -komennolla, kun melodiatiedostossa on `"lang": "fi"` (muunnin kirjoittaa
-  sen). Muunnin kirjoittaa suomen sanat valmiiksi tavutettuina (`kis-sa`) ja tarkistaa lopuksi
-  tavumäärän Chimeralta. Duettisivu (`?show=`) lukee melodiatiedoston sanat vielä englannin
-  säännöin, joten suomenkielisen show'n sanat suun vieressä voivat mennä väärin.
-- Chimeran melismamerkki `-` toimii vain sanojen välissä. Sävelvaihdos sanan sisällä (muulla kuin
-  viimeisellä tavulla) yhdistetään yhdeksi nuotiksi, jonka sävel on pidemmän osan sävel.
-- Vain yksi laulaja kerrallaan. Taustalaulut, harmoniat ja voimakas kaiku tai autotune
-  sekoittavat sävelkorkeuden seurantaa ja kohdistusta.
-- Kohdistus olettaa, että sanoitus vastaa laulua. Puuttuva tai ylimääräinen säe siirtää kaikkia
-  sen jälkeisiä tavuja.
-- Englannissa tavumäärä on varma vain, kun Chimera löytyy (`--chimera`, ja sen
-  `target\release\chimera.exe` on käännetty). Ilman sitä tuntemattomien sanojen tavut arvataan.
-  Lopuksi muunnin tarkistaa tavumäärän Chimeralta ja varoittaa, jos se ei täsmää.
-- Tekijänoikeuden alaisista äänitteistä tehtyjä tiedostoja ei pidä lisätä Chimeran git-repoon
-  (repon sääntö). Pidä ne kansiossa `out\` tai repon ulkopuolella.
+- Finnish words are written pre-split (`kis-sa`) and the converter checks the syllable count
+  against Chimera at the end.
+- Chimera's melisma mark `-` only works between words: a pitch change inside an English word
+  (on any but its last syllable) is merged into one note, with the pitch of the longer part.
+- One singer at a time. Backing vocals, harmonies and heavy reverb or autotune confuse the pitch
+  tracking and the alignment.
+- The alignment assumes the lyrics match the singing. A missing or extra line shifts every
+  syllable after it.
+- English syllable counts are certain only when Chimera is found and its
+  `target\release\chimera.exe` is built; without it unknown words are guessed. The converter
+  checks the count against Chimera at the end and warns when it doesn't match.
+- Files made from copyrighted recordings must not be added to Chimera's git repo (the repo's
+  rule). Keep them in `out\` or outside the repo.
 
-## Testit
+## Tests
 
 ```powershell
 python -m pytest -q
 ```
 
-Testit tarkistavat kielen tunnistuksen, suomen tavutuksen, Chimeran tavujaon lukemisen,
-CTC-kohdistuksen, nuottien muodostuksen synteettisellä laulusignaalilla (sävelet, vibrato, legato,
-tauko, melisma, sävelen ennakointi konsonantissa), koko ajon sekä sovelluksen palvelimen
-(muunnos, muokkaus, renderöinti, show-vienti, kielen vaihto). Käyttöliittymän muokkaussäännöt
-testataan `app`-kansiossa: `bun run test`.
+The tests cover language detection, Finnish syllabification, reading Chimera's syllable split,
+CTC alignment, note finding on synthetic singing (pitches, vibrato, legato, rests, melismas, a
+pitch anticipated in a consonant, a singer drifting flat, rough singing), placing syllables on
+notes, a whole run, and the app's server (conversion, the singing check, editing, rendering, show
+export, language change). The UI's editing rules are tested in `app`: `bun run test`.
 
-`scripts\smoke.bat` ajaa oikeilla malleilla edestakaisen testin: Chimera laulaa demokappaleensa,
-muunnin lukee ne takaisin ja Chimera laulaa tuloksen.
+`scripts\smoke.bat` runs a round trip with the real models: Chimera sings its demo songs, the
+converter reads them back and Chimera sings the result.
