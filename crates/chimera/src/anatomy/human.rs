@@ -276,14 +276,21 @@ pub struct HumanBody {
 pub const BODY_MALE: HumanBody = HumanBody { name: "Adult male", scale: 1.0, pharynx: 1.0, tongue_radius: 2.25, lip_width: 4.6 };
 pub const BODY_FEMALE: HumanBody = HumanBody { name: "Adult female", scale: 0.9, pharynx: 0.88, tongue_radius: 2.2, lip_width: 4.4 };
 pub const BODY_CHILD: HumanBody = HumanBody { name: "Child", scale: 0.74, pharynx: 0.8, tongue_radius: 2.15, lip_width: 4.0 };
+/// A Neanderthal man (La Ferrassie 1 sized): a larger head and a long mouth over a relatively
+/// short pharynx (the "long mouth, short neck" of the reconstructions; Lieberman & Crelin 1971
+/// put the larynx higher still, Boë et al. 2002 showed the vowel space need not shrink for it).
+/// The pharynx factor stays within the calibrated bodies' range (the female's), so the adult
+/// male's articulations, which this body borrows, still close and open where they should.
+pub const BODY_NEANDERTHAL: HumanBody = HumanBody { name: "Neanderthal", scale: 1.06, pharynx: 0.88, tongue_radius: 2.25, lip_width: 4.9 };
 
-/// The three human bodies by their short names.
+/// The human bodies by their short names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BodyName {
     Male,
     Female,
     Child,
+    Neanderthal,
 }
 
 impl BodyName {
@@ -292,6 +299,7 @@ impl BodyName {
             BodyName::Male => BODY_MALE,
             BodyName::Female => BODY_FEMALE,
             BodyName::Child => BODY_CHILD,
+            BodyName::Neanderthal => BODY_NEANDERTHAL,
         }
     }
     pub fn as_str(self) -> &'static str {
@@ -299,6 +307,15 @@ impl BodyName {
             BodyName::Male => "male",
             BodyName::Female => "female",
             BodyName::Child => "child",
+            BodyName::Neanderthal => "neanderthal",
+        }
+    }
+    /// The phonetics tables' key for this body's calibrated targets. The Neanderthal has no
+    /// recordings to calibrate against: it makes the adult male's gestures with its own anatomy.
+    pub fn cal_name(self) -> &'static str {
+        match self {
+            BodyName::Neanderthal => "male",
+            b => b.as_str(),
         }
     }
     /// The phonetics tables key bodies by name; anything else is treated as male, as in TS.
@@ -306,39 +323,59 @@ impl BodyName {
         match s {
             "female" => BodyName::Female,
             "child" => BodyName::Child,
+            "neanderthal" => BodyName::Neanderthal,
             _ => BodyName::Male,
         }
     }
 }
 
-/// A body anywhere between the three calibrated ones: `female` runs from the adult male (0) to
-/// the adult female (1), `child` from adult (0) to child (1). The child has no female axis, so
-/// the weights are male (1−c)(1−f), female (1−c)·f, child c. Everything body-dependent (the
-/// anatomy, the calibrated phoneme targets, the default pitch) blends with these weights; at a
-/// preset it is exactly that preset.
+fn is_zero(x: &f64) -> bool {
+    *x == 0.0
+}
+
+/// A body anywhere between the calibrated ones: `female` runs from the adult male (0) to the adult
+/// female (1), `child` from adult (0) to child (1), and `neanderthal` from a modern human (0) to
+/// the Neanderthal (1). The child has no female axis and the Neanderthal neither, so the weights
+/// are male (1−n)(1−c)(1−f), female (1−n)(1−c)·f, child (1−n)·c, Neanderthal n. Everything
+/// body-dependent (the anatomy, the calibrated phoneme targets, the default pitch) blends with
+/// these weights; at a preset it is exactly that preset.
 ///
-/// Deserializes from a preset name (`"female"`) or `{ "female": f, "child": c }`.
+/// Deserializes from a preset name (`"female"`) or `{ "female": f, "child": c, "neanderthal": n }`
+/// (`neanderthal` optional, and left out when it is 0, so older files and goldens are unchanged).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
 pub struct BodyMix {
     pub female: f64,
     pub child: f64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub neanderthal: f64,
 }
 
 impl BodyMix {
-    pub const MALE: BodyMix = BodyMix { female: 0.0, child: 0.0 };
-    pub const FEMALE: BodyMix = BodyMix { female: 1.0, child: 0.0 };
-    pub const CHILD: BodyMix = BodyMix { female: 0.0, child: 1.0 };
+    pub const MALE: BodyMix = BodyMix { female: 0.0, child: 0.0, neanderthal: 0.0 };
+    pub const FEMALE: BodyMix = BodyMix { female: 1.0, child: 0.0, neanderthal: 0.0 };
+    pub const CHILD: BodyMix = BodyMix { female: 0.0, child: 1.0, neanderthal: 0.0 };
+    pub const NEANDERTHAL: BodyMix = BodyMix { female: 0.0, child: 0.0, neanderthal: 1.0 };
 
-    /// Clamped to 0..1 (non-finite values count as 0).
+    /// A modern human body, clamped to 0..1 (non-finite values count as 0).
     pub fn new(female: f64, child: f64) -> BodyMix {
-        let c = |x: f64| if x.is_finite() { clamp(x, 0.0, 1.0) } else { 0.0 };
-        BodyMix { female: c(female), child: c(child) }
+        BodyMix::with_neanderthal(female, child, 0.0)
     }
 
-    /// Weights of male, female and child (they sum to 1).
-    pub fn weights(self) -> [(BodyName, f64); 3] {
-        let BodyMix { female: f, child: c } = BodyMix::new(self.female, self.child);
-        [(BodyName::Male, (1.0 - c) * (1.0 - f)), (BodyName::Female, (1.0 - c) * f), (BodyName::Child, c)]
+    /// Any body, clamped to 0..1 (non-finite values count as 0).
+    pub fn with_neanderthal(female: f64, child: f64, neanderthal: f64) -> BodyMix {
+        let c = |x: f64| if x.is_finite() { clamp(x, 0.0, 1.0) } else { 0.0 };
+        BodyMix { female: c(female), child: c(child), neanderthal: c(neanderthal) }
+    }
+
+    /// This body with every axis clamped.
+    pub fn clamped(self) -> BodyMix {
+        BodyMix::with_neanderthal(self.female, self.child, self.neanderthal)
+    }
+
+    /// Weights of male, female, child and Neanderthal (they sum to 1).
+    pub fn weights(self) -> [(BodyName, f64); 4] {
+        let BodyMix { female: f, child: c, neanderthal: n } = self.clamped();
+        [(BodyName::Male, (1.0 - n) * (1.0 - c) * (1.0 - f)), (BodyName::Female, (1.0 - n) * (1.0 - c) * f), (BodyName::Child, (1.0 - n) * c), (BodyName::Neanderthal, n)]
     }
 
     /// The preset this is exactly, if any.
@@ -387,6 +424,7 @@ impl From<BodyName> for BodyMix {
             BodyName::Male => BodyMix::MALE,
             BodyName::Female => BodyMix::FEMALE,
             BodyName::Child => BodyMix::CHILD,
+            BodyName::Neanderthal => BodyMix::NEANDERTHAL,
         }
     }
 }
@@ -408,11 +446,13 @@ impl<'de> Deserialize<'de> for BodyMix {
                 female: f64,
                 #[serde(default)]
                 child: f64,
+                #[serde(default)]
+                neanderthal: f64,
             },
         }
         Ok(match Wire::deserialize(d)? {
             Wire::Name(s) => BodyMix::from(s.as_str()),
-            Wire::Mix { female, child } => BodyMix::new(female, child),
+            Wire::Mix { female, child, neanderthal } => BodyMix::with_neanderthal(female, child, neanderthal),
         })
     }
 }

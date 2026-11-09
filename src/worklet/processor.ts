@@ -76,7 +76,8 @@ class ChimeraProcessor extends AudioWorkletProcessor {
   }
 
   private body(): BodyMix {
-    return { female: this.x.engine_body_female(this.h), child: this.x.engine_body_child(this.h) };
+    const female = this.x.engine_body_female(this.h), child = this.x.engine_body_child(this.h), neanderthal = this.x.engine_body_neanderthal(this.h);
+    return neanderthal > 0 ? { female, child, neanderthal } : { female, child };
   }
 
   private postReady(): void {
@@ -106,7 +107,7 @@ class ChimeraProcessor extends AudioWorkletProcessor {
     const x = this.x, h = this.h;
     switch (m.type) {
       case "body":
-        x.engine_set_body(h, m.body.female, m.body.child);
+        x.engine_set_body(h, m.body.female, m.body.child, m.body.neanderthal ?? 0);
         this.postReady();
         break;
       case "artic": {

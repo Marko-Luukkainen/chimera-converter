@@ -77,7 +77,9 @@ export function BodyPad() {
       onPointerCancel={end}
       onLostPointerCapture={end}
       onKeyDown={(e) => {
-        const b = useStore.getState().body;
+        const s = useStore.getState().body;
+        // the pad is the modern bodies' triangle: a step from the Neanderthal lands in it
+        const b = { female: s.female, child: s.child };
         const next =
           e.key === "ArrowLeft" ? { ...b, female: q(b.female - STEP) }
           : e.key === "ArrowRight" ? { ...b, female: q(b.female + STEP) }
@@ -87,7 +89,7 @@ export function BodyPad() {
           : null;
         if (!next) return;
         e.preventDefault();
-        if (!sameBody(next, b)) setBody(next);
+        if (!sameBody(next, s)) setBody(next);
       }}
     >
       <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} aria-hidden="true">

@@ -15,7 +15,7 @@ const NOW_AT = 0.7;
 const SPAN = 25;
 const BLACK = [1, 3, 6, 8, 10];
 const NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
-const KEY_CENTRE: Record<string, number> = { male: 54, female: 66, child: 70 };
+const KEY_CENTRE: Record<string, number> = { male: 54, female: 66, child: 70, neanderthal: 52 };
 
 const hzToMidi = (f: number) => 69 + 12 * Math.log2(f / 440);
 

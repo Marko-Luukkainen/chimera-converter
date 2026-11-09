@@ -3,12 +3,12 @@
 //! several vowel postures and flags any step far above its neighbours.
 //! (Port of tests/geometry-continuity.test.ts.)
 use chimera::anatomy::geom::{Polyline, Vec2, ray_crossings};
-use chimera::anatomy::human::{ArticKey, BODY_CHILD, BODY_FEMALE, BODY_MALE, HumanArtic, HumanBody, HumanFrame, HumanVocalTract, NEUTRAL, rest_tip};
+use chimera::anatomy::human::{ArticKey, BODY_CHILD, BODY_FEMALE, BODY_MALE, BODY_NEANDERTHAL, BodyName, HumanArtic, HumanBody, HumanFrame, HumanVocalTract, NEUTRAL, rest_tip};
 use chimera::math::{js_max, js_min};
 use chimera::phonetics::planner::{vowel_artic, vowel_table};
 use std::collections::HashMap;
 
-const BODIES: [(&str, HumanBody); 3] = [("male", BODY_MALE), ("female", BODY_FEMALE), ("child", BODY_CHILD)];
+const BODIES: [(&str, HumanBody); 4] = [("male", BODY_MALE), ("female", BODY_FEMALE), ("child", BODY_CHILD), ("neanderthal", BODY_NEANDERTHAL)];
 
 /// The tract's 20 + 24 section areas for an articulation.
 struct Areas {
@@ -160,7 +160,7 @@ fn no_area_jumps_on_the_way_between_calibrated_vowels() {
     for (body_name, body) in BODIES {
         let mut areas = Areas::new(body);
         // the full calibrated posture, tongue tip included (the rhotic's raised, curled tip)
-        let posture = |vw: &str| vowel_table()[body_name][vw].artic.apply_to(&NEUTRAL);
+        let posture = |vw: &str| vowel_table()[BodyName::parse(body_name).cal_name()][vw].artic.apply_to(&NEUTRAL);
         for (x, y) in pairs {
             let (a, b) = (posture(x), posture(y));
             let at = |u: f64| {

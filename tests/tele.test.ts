@@ -10,14 +10,17 @@ const [nArtic, nPh, nOr, nScope] = [17, 3, 2, 32];
 const LEN = 11 + nArtic + 3 * (nPh + nOr) + 2 * nScope;
 
 /** a file of `frames` frames: frame i has f0 = 100 + i, clock = i·768/48000 and artic[k] = i + k/100 */
-function file(frames: number, o: { version?: number; cut?: number } = {}): ArrayBuffer {
-  const buf = new ArrayBuffer(48 + 4 * frames * LEN);
+function file(frames: number, o: { version?: number; cut?: number; neanderthal?: number } = {}): ArrayBuffer {
+  const version = o.version ?? 1;
+  const header = version >= 2 ? 52 : 48;
+  const buf = new ArrayBuffer(header + 4 * frames * LEN);
   const d = new DataView(buf);
   new Uint8Array(buf).set(new TextEncoder().encode("CHTL"));
-  [o.version ?? 1, 48000, 768, frames, LEN, nArtic, nPh, nOr, nScope].forEach((x, i) => d.setUint32(4 + 4 * i, x, true));
-  d.setFloat32(40, 1, true); // female
+  [version, 48000, 768, frames, LEN, nArtic, nPh, nOr, nScope].forEach((x, i) => d.setUint32(4 + 4 * i, x, true));
+  d.setFloat32(40, o.neanderthal ? 0 : 1, true); // female
   d.setFloat32(44, 0, true);
-  const f = new Float32Array(buf, 48);
+  if (version >= 2) d.setFloat32(48, o.neanderthal ?? 0, true);
+  const f = new Float32Array(buf, header);
   for (let i = 0; i < frames; i++) {
     f[i * LEN + 3] = 100 + i;
     f[i * LEN + 10] = (i * 768) / 48000;
@@ -44,6 +47,13 @@ describe("TeleTrack", () => {
     expect([m.nPh, m.nOr, m.beatStep]).toEqual([nPh, nOr, 7]);
   });
 
+  test("version 2 carries the Neanderthal axis of the body; a modern body reads as before", () => {
+    const n = new TeleTrack(file(10, { version: 2, neanderthal: 1 }));
+    expect(n.body).toEqual({ female: 0, child: 0, neanderthal: 1 });
+    expect(n.message(4).t.f0).toBe(104);
+    expect(new TeleTrack(file(10, { version: 2 })).body).toEqual({ female: 1, child: 0 });
+  });
+
   test("the frame at a time is the last one recorded by then, clamped to the recording", () => {
     const t = new TeleTrack(file(10));
     expect(t.indexAt(0)).toBe(0);
@@ -59,7 +69,7 @@ describe("TeleTrack", () => {
   test("refuses a truncated file, another version or another format", () => {
     expect(() => new TeleTrack(file(10, { cut: 4 }))).toThrow(/bytes/);
     expect(() => new TeleTrack(file(10).slice(0, 20))).toThrow(/too short/);
-    expect(() => new TeleTrack(file(10, { version: 2 }))).toThrow(/version 2/);
+    expect(() => new TeleTrack(file(10, { version: 3 }))).toThrow(/version 3/);
     const other = file(2);
     new Uint8Array(other).set(new TextEncoder().encode("RIFF"));
     expect(() => new TeleTrack(other)).toThrow(/not a CHIMERA/);

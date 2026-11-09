@@ -88,7 +88,8 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
     controls.zoomSpeed = 0.8;
     controls.screenSpacePanning = true;
     controls.minDistance = 20;
-    controls.maxDistance = 220;
+    // far enough to see a standing body whole (the Neanderthal)
+    controls.maxDistance = 900;
 
     // camera moves (the opening turn from the side view, double-click home): orbit round the target
     const tween = { on: false, t: 0, dur: 1, p0: new THREE.Vector3(), q0: new THREE.Vector3(), p1: new THREE.Vector3(), q1: new THREE.Vector3() };
@@ -117,6 +118,8 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
     };
     controls.addEventListener("start", () => (tween.on = false));
     let posed: VoiceModel | null = null;
+    /** whether the body the camera was placed for stands (a whole figure, not a head) */
+    let posedStanding = false;
     /** the head centre the camera was placed for (a new body moves the view with it) */
     const posedTarget = new THREE.Vector3();
     const home = () => {
@@ -203,6 +206,9 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
             camera.position.copy(p.side);
             controls.target.copy(p.target);
             moveTo(p.home, p.target, 1.6);
+          } else if (r.standing(m) !== posedStanding) {
+            // from a head to a standing body or back: frame the new one
+            moveTo(p.home, p.target, 1.2);
           } else {
             // another body: keep the view, centred on the new head
             off.copy(p.target).sub(posedTarget);
@@ -211,6 +217,7 @@ export function AnatomyView3D(props: { slots?: SlotsFn; info?: InfoFn; showForma
           }
           posedTarget.copy(p.target);
           posed = m;
+          posedStanding = r.standing(m);
         } else if (refit) {
           const p = r.poses(m);
           moveTo(p.home, p.target, 0.4);

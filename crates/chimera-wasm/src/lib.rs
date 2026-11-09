@@ -269,15 +269,17 @@ pub unsafe extern "C" fn engine_set_gate(h: *mut Handle, level: f64) {
     handle!(h).engine.set_gate(level);
 }
 
-/// Switch body: `female` 0 (male) … 1 (female), `child` 0 (adult) … 1 (child); see `BodyMix`.
-/// Allocates. The new voice's node counts can be read with `engine_n_ph`/`engine_n_or`.
+/// Switch body: `female` 0 (male) … 1 (female), `child` 0 (adult) … 1 (child), `neanderthal`
+/// 0 (modern) … 1 (Neanderthal; a caller passing only two numbers gets NaN here, which counts as
+/// 0); see `BodyMix`. Allocates. The new voice's node counts can be read with
+/// `engine_n_ph`/`engine_n_or`.
 ///
 /// # Safety
 /// `h` must be a live handle.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn engine_set_body(h: *mut Handle, female: f64, child: f64) {
+pub unsafe extern "C" fn engine_set_body(h: *mut Handle, female: f64, child: f64, neanderthal: f64) {
     let h = handle!(h);
-    h.engine.set_body(BodyMix::new(female, child));
+    h.engine.set_body(BodyMix::with_neanderthal(female, child, neanderthal));
     h.engine.telemetry(&mut h.tele); // resize the telemetry buffers for the new voice
 }
 
@@ -328,6 +330,13 @@ pub unsafe extern "C" fn engine_body_female(h: *mut Handle) -> f64 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn engine_body_child(h: *mut Handle) -> f64 {
     handle!(h).engine.info().body.child
+}
+
+/// # Safety
+/// `h` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn engine_body_neanderthal(h: *mut Handle) -> f64 {
+    handle!(h).engine.info().body.neanderthal
 }
 
 /// Evaluate one of the engine's math functions (diagnostics: native and wasm must agree bit for
