@@ -46,6 +46,9 @@ cargo run --release -p chimera-cli -- calibrate vowels all --fi --contour
 cargo run --release -p chimera-cli -- anatomy frame female/contour i > frame.json
 ```
 
+The app's switch has its own browser test: `bun run build && bun run preview`, then
+`bun tools/e2e-anatomy.ts`.
+
 `extract.py` needs numpy, scipy, scikit-image and openpyxl. `anatomy fit` prints each line's fit
 and the guides' ranges; `anatomy frame` prints a posture's geometry as JSON.
 

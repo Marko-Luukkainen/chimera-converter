@@ -77,7 +77,10 @@ class ChimeraProcessor extends AudioWorkletProcessor {
 
   private body(): BodyMix {
     const female = this.x.engine_body_female(this.h), child = this.x.engine_body_child(this.h), neanderthal = this.x.engine_body_neanderthal(this.h);
-    return neanderthal > 0 ? { female, child, neanderthal } : { female, child };
+    const b: BodyMix = neanderthal > 0 ? { female, child, neanderthal } : { female, child };
+    // the anatomy too: the views draw telemetry only when its body is the page's (sameBody)
+    if (this.x.engine_body_model(this.h) === 1) b.model = "contour";
+    return b;
   }
 
   private postReady(): void {

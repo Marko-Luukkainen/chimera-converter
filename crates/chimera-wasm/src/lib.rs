@@ -341,6 +341,15 @@ pub unsafe extern "C" fn engine_body_neanderthal(h: *mut Handle) -> f64 {
     handle!(h).engine.info().body.neanderthal
 }
 
+/// The current body's anatomy: 1 for the MRI contour anatomy, 0 for the classic one.
+///
+/// # Safety
+/// `h` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn engine_body_model(h: *mut Handle) -> f64 {
+    if handle!(h).engine.info().body.model == TractModel::Contour { 1.0 } else { 0.0 }
+}
+
 /// Evaluate one of the engine's math functions (diagnostics: native and wasm must agree bit for
 /// bit). 0 sin 1 cos 2 tan 3 exp 4 ln 5 log10 6 log2 7 pow 8 tanh 9 atan2 10 acos 11 cbrt 12 hypot 13 sqrt.
 #[unsafe(no_mangle)]

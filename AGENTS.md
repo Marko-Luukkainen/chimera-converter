@@ -54,4 +54,4 @@ and the CLI) under a React UI. See the README.
 | anything | `bun run test` and `bun run typecheck` |
 | `crates/chimera/` sound | re-bless goldens (above); `cargo run --release -q -p chimera --example bench` against the previous commit |
 | `crates/chimera-wasm/`, `src/wasm/`, `src/worklet/`, `src/main.tsx` | `bun run build && bun run preview`, then `bun tools/e2e.ts` |
-| `src/ui/`, `src/show/`, CSS | `bun run lint:layout` |
+| `src/ui/`, `src/show/`, CSS | `bun run lint:layout`; the anatomy switch: `bun tools/e2e-anatomy.ts` against `bun run preview` |
