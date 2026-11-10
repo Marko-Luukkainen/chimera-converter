@@ -244,3 +244,25 @@ def test_a_missing_separator_module_is_named():
     assert "audioread" in audio.missing_separator(e) and "is installed" in audio.missing_separator(e)
     e = ModuleNotFoundError("No module named 'audio_separator'", name="audio_separator")
     assert "needs audio-separator" in audio.missing_separator(e)
+
+
+def test_a_vowel_after_a_consonant_step_is_found_where_it_reaches_the_vowel():
+    """On the real song ("on" at 100.9 s in a 3-minute rap) the band rose in two steps, consonant
+    then vowel; the steepest point was the consonant's, 15 ms after it the level was still 23 dB
+    under the vowel, and the vowel was refused. It is found now, where it comes within 12 dB of
+    the vowel."""
+    H = rap.HOP_ENV
+    env = np.full(200, -45.0)
+    t = np.arange(200) * H
+    env[(t >= 0.500) & (t < 0.510)] = -27.0   # the consonant's steep step ...
+    ramp = (t >= 0.510) & (t < 0.570)
+    env[ramp] = np.linspace(-27, -3, ramp.sum())  # ... rising on without a pause into the vowel
+    env[t >= 0.570] = -3.0
+    env[t >= 0.800] = -45.0
+    r = rap.vowel_rises(env, 4.0)
+    assert len(r) == 1 and 0.535 <= r[0] <= 0.555, r
+    # legato: a shallow dip between two vowels still counts, at its steepest point
+    env2 = np.full(200, -4.0)
+    env2[(t >= 0.40) & (t < 0.45)] = -14.0
+    r2 = rap.vowel_rises(env2, 4.0)
+    assert len(r2) == 1 and abs(r2[0] - 0.45) <= 0.011, r2

@@ -100,15 +100,22 @@ def ctc_onsets(words, lp: np.ndarray, frame: float, vocab: dict, blank: int, fr:
     return assign.ctc_onsets(words, lp, frame, vocab, blank, pres)
 
 
-def vowel_rises(env: np.ndarray, min_rise: float) -> np.ndarray:
-    """Where a vowel starts: one time per rise of the vowel band's energy of at least `min_rise`
-    dB over 20 ms (the steepest point of each rise; the middle of a flat top) that reaches
-    within 12 dB of the loudest moment of the next 150 ms."""
+def vowel_rises(env: np.ndarray, min_rise: float, reach: float = 12.0) -> np.ndarray:
+    """Where a vowel starts: for each rise of the vowel band's energy of at least `min_rise` dB
+    over 20 ms, the first moment it comes within `reach` dB of the loudest moment of the next
+    150 ms. A rise that never gets that close is not a vowel (a fricative after silence leaks into
+    the band, but stays well below the vowel that follows).
+
+    Not the steepest point of the rise: a syllable often rises in two steps, its consonant and
+    then its vowel, and the steepest step can be the consonant's (on a real song, such vowels
+    were refused for being too quiet 15 ms past the steepest point). Where the rise starts within
+    `reach` of the top already (a shallow dip between legato syllables), the steepest point."""
     n = len(env)
     rise = np.zeros(n)
     if n >= 5:
         rise[2:n - 2] = env[4:] - env[:-4]
     up = rise >= min_rise
+    look = int(0.15 / HOP_ENV)
     out = []
     i = 0
     while i < n:
@@ -118,14 +125,16 @@ def vowel_rises(env: np.ndarray, min_rise: float) -> np.ndarray:
         j = i
         while j < n and up[j]:
             j += 1
-        seg = rise[i:j]
-        top = np.flatnonzero(seg >= seg.max() - 1e-9)
-        c = int(round(i + (top[0] + top[-1]) / 2))
-        # a vowel rises to (near) its own loudness; a consonant after silence (a fricative's
-        # leak into the band) rises too, but stays well below the vowel that follows
-        reach = env[min(n - 1, c + 3)]
-        if reach >= env[c:c + int(0.15 / HOP_ENV)].max() - 12.0:
-            out.append((i + (top[0] + top[-1]) / 2) * HOP_ENV)
+        a = max(0, i - 2)
+        top = env[a:min(n, i + look)].max()
+        hit = np.flatnonzero(env[a:min(n, j + 3)] >= top - reach)
+        if len(hit):
+            if env[a] >= top - reach:  # a shallow dip (legato): the steepest point
+                seg = rise[i:j]
+                top_i = np.flatnonzero(seg >= seg.max() - 1e-9)
+                out.append((i + (top_i[0] + top_i[-1]) / 2) * HOP_ENV)
+            else:
+                out.append((a + hit[0]) * HOP_ENV)
         i = j
     return np.array(out)
 
