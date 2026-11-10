@@ -146,3 +146,16 @@ def test_short_gaps_are_held_but_a_line_break_breathes():
     assert out[1].end == 0.85  # into its own melisma
     assert out[2].end == 1.0  # syllable 1 ends a line: the singer breathes before syllable 2
     assert out[3].end == 1.6  # a real rest (0.9 s) stays
+
+
+def test_digital_silence_does_not_drag_the_gate_down():
+    """A RoFormer stem zeroes the gaps. With those frames in, Otsu split silence from everything
+    and suggested -43 dB on a real rap song: breaths and reverb counted as voice, no rest was
+    left. Without them the split is between the quiet room and the voice again."""
+    rng = np.random.default_rng(2)
+    # the real stem's level histogram (% of 10 ms frames per 5 dB bin), digital silence at -100 dB
+    hist = {-100: 3, -40: 1, -35: 2, -30: 3, -25: 5, -20: 8, -15: 10, -10: 40, -5: 22}
+    db = np.concatenate([rng.uniform(lo, lo + 5, 100 * pct) for lo, pct in hist.items()])
+    rms = np.where(db <= -95, 0.0, 10 ** (db / 20))
+    d = tx.suggest(rms, voice_only=True)
+    assert -25 < d.gate_db < -12, d.gate_db  # it was -43

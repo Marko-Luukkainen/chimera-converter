@@ -99,11 +99,18 @@ def level_db(rms: np.ndarray) -> np.ndarray:
 
 def suggest(rms: np.ndarray, voice_only: bool) -> Detection:
     """Thresholds for a recording: on a voice track (separated, or recorded alone) the level that
-    best splits singing from the rest (Otsu, 2 dB lower so soft singing stays in) and loud
-    rough singing counted; on a full mix only a clear pitch counts (the band is loud too)."""
+    best splits singing from the rest (Otsu over the frames above digital silence, 2 dB lower so
+    soft singing stays in) and loud rough singing counted; on a full mix only a clear pitch counts (the band is loud too)."""
     if not voice_only:
         return Detection(-38.0, 0.15, 0.0)
-    x = np.clip(level_db(rms), -80, 0)
+    x = level_db(rms)
+    # digital silence (a separator that zeroes the gaps, like RoFormer) is not part of the split:
+    # with it in, Otsu splits silence from everything else and the gate drops to about -43 dB,
+    # where breaths and reverb tails count as voice and no rest is left (seen on a real stem)
+    sound = x[x > -70]
+    if len(sound) >= 10:
+        x = sound
+    x = np.clip(x, -80, 0)
     h, e = np.histogram(x, bins=80, range=(-80, 0))
     c = (e[:-1] + e[1:]) / 2
     best, thr = -1.0, -38.0
