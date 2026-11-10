@@ -32,7 +32,7 @@ export interface Session {
   lang: Lang;
   lang_requested: "auto" | Lang;
   detection: Detection;
-  options: { separate: boolean; align: string; review?: boolean };
+  options: { separate: boolean; align: string; review?: boolean; style?: "sing" | "rap" };
   /** what counted as singing (the thresholds the notes were made with) */
   singing?: Singing;
   files: { original: string; vocals?: string };

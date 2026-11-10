@@ -193,10 +193,13 @@ class Worker:
         progress("notes", 0.0)
         text = (d / "lyrics.txt").read_text(encoding="utf-8")
         lyr = pipeline.prepare_lyrics(text, s["lang"], self.cli, self.repo)
-        o = notes.Opts()
-        pl = pipeline.place_notes(lyr, an, s["options"].get("align", "mms"), self.device, o, None, progress, log=lambda *_: None)
+        rap = s["options"].get("style", "sing") == "rap"
+        o = notes.Opts(rest=0.15 if rap else 0.25)
+        pl = pipeline.place_notes(lyr, an, s["options"].get("align", "mms"), self.device, o, None, progress, log=lambda *_: None,
+                                  style=s["options"].get("style", "sing"))
         ns = pl.notes
-        mel = pipeline.build_melody(ns, lyr, source=s["files"]["original"], cli=self.cli)
+        vibrato = 0.0 if rap else 35.0
+        mel = pipeline.build_melody(ns, lyr, rest=o.rest, keep_cents=rap, vibrato=vibrato, source=s["files"]["original"], cli=self.cli)
         midi = [None if not np.isfinite(v) else round(float(v), 2) for v in an.midi]
         s = self.store.load(sid)
         s.update(status="done", stage="Done", progress=1.0, lyrics=lyr.to_dict(), phase="notes",
@@ -204,7 +207,7 @@ class Worker:
                  contour={"hop": float(an.t[1] - an.t[0]) if len(an.t) > 1 else 0.01, "midi": midi},
                  duration=round(an.duration, 3), pitch_method=an.pitch_method,
                  notes=[asdict(n) for n in ns], auto_notes=[asdict(n) for n in ns],
-                 body=mel.data["body"], transpose=0.0, vibrato=35.0,
+                 body=mel.data["body"], transpose=0.0, vibrato=vibrato,
                  melody=mel.data, warnings=mel.warnings, render=None, doubtful=pl.doubtful,
                  singing=an.singing.to_dict() if an.singing else s.get("singing"),
                  tuning_cents=round(float(np.median(an.tr.tuning)) * 100) if an.tr else 0)
@@ -385,9 +388,13 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
     @app.post("/api/sessions")
     async def sessions_new(audio: UploadFile = File(...), lyrics: str = Form(...), lang: str = Form("auto"),
                            separate: bool = Form(False), title: str = Form(""), align: str = Form("mms"),
-                           review: bool = Form(True)):
+                           review: bool = Form(True), style: str = Form("sing")):
         if lang not in ("auto", "fi", "en"):
             raise HTTPException(400, "lang must be auto, fi or en")
+        if style not in pipeline.STYLES:
+            raise HTTPException(400, "style must be sing or rap")
+        if style == "rap" and align != "mms":
+            raise HTTPException(400, "the rap style needs the automatic lyrics alignment")
         try:
             lang_used, det = pipeline.resolve_lang(lyrics, lang)
         except ValueError as e:
@@ -404,7 +411,7 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
         s = {"id": sid, "title": title or Path(audio.filename or "song").stem, "created": time.time(),
              "status": "queued", "stage": "Queued", "progress": 0.0, "error": None,
              "lang": lang_used, "lang_requested": lang, "detection": det,
-             "options": {"separate": separate, "align": align, "review": review}, "files": {"original": f"original{ext}"},
+             "options": {"separate": separate, "align": align, "review": review, "style": style}, "files": {"original": f"original{ext}"},
              "phase": "analyze",
              "lyrics_text": lyrics}
         store.save(s)
@@ -493,8 +500,9 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
             ns.sort(key=lambda n: n.start)
             if lyr.lang != "fi":
                 ns = chimera.merge_inner_melismas(ns, lyr.syl_word, lyr.words, log=lambda *_: None)
-            mel = pipeline.build_melody(ns, lyr, transpose=body.transpose, vibrato=body.vibrato,
-                                        source=s["files"]["original"], body=body.body or s.get("body"), cli=worker.cli if worker else None)
+            rap = s["options"].get("style", "sing") == "rap"
+            mel = pipeline.build_melody(ns, lyr, rest=0.15 if rap else 0.25, transpose=body.transpose, vibrato=body.vibrato,
+                                        keep_cents=rap, source=s["files"]["original"], body=body.body or s.get("body"), cli=worker.cli if worker else None)
         except (ValueError, KeyError, TypeError) as e:
             raise HTTPException(400, str(e))
         s.update(notes=[asdict(n) for n in ns], melody=mel.data, warnings=mel.warnings, body=mel.data["body"],

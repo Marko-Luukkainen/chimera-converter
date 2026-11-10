@@ -1,0 +1,4 @@
+# Optional: the RoFormer separator (--separator roformer) and the lead voice (--lead-only).
+# Install after requirements.txt; on an NVIDIA GPU:
+audio-separator[gpu]>=0.48
+# without one: audio-separator[cpu]>=0.48

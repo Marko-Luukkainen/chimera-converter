@@ -13,6 +13,7 @@ export function NewSong(props: { onCreated: (id: string) => void }) {
   const [separate, setSeparate] = useState(true);
   const [review, setReview] = useState(true);
   const [align, setAlign] = useState("mms");
+  const [style, setStyle] = useState("sing");
   const [det, setDet] = useState<Detection | null>(null);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(0);
@@ -47,6 +48,7 @@ export function NewSong(props: { onCreated: (id: string) => void }) {
     form.append("review", String(review));
     form.append("title", title);
     form.append("align", align);
+    form.append("style", style);
     try {
       setSent(0);
       const s = await api.upload(form, setSent);
@@ -127,8 +129,23 @@ export function NewSong(props: { onCreated: (id: string) => void }) {
       </label>
 
       <label className="check">
+        Style
+        <select
+          value={style}
+          onChange={(e) => {
+            setStyle(e.target.value);
+            if (e.target.value === "rap") setAlign("mms");
+          }}
+          name="style"
+        >
+          <option value="sing">Singing (notes first, syllables on them)</option>
+          <option value="rap">Rap (words first, one note per syllable)</option>
+        </select>
+      </label>
+
+      <label className="check">
         Lyrics alignment
-        <select value={align} onChange={(e) => setAlign(e.target.value)} name="align">
+        <select value={align} onChange={(e) => setAlign(e.target.value)} name="align" disabled={style === "rap"}>
           <option value="mms">Automatic (speech alignment model)</option>
           <option value="none">In order (no model, needs more fixing)</option>
         </select>

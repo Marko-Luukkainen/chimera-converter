@@ -239,3 +239,16 @@ def test_the_thresholds_are_checked_before_the_notes(client, tmp_path):
     # a new language uses the kept analysis too
     assert client.post(f"/api/sessions/{sid}/lang", json={"lang": "fi"}).status_code == 200
     assert wait_done(client, sid)["status"] == "done"
+
+
+def test_rap_style_is_kept_and_needs_the_alignment(client, tmp_path):
+    wav = tmp_path / "rap.wav"
+    sf.write(wav, voice(), SR)
+    with open(wav, "rb") as f:
+        r = client.post("/api/sessions", files={"audio": ("rap.wav", f, "audio/wav")},
+                        data={"lyrics": "pieni tähti", "lang": "fi", "align": "none", "style": "rap"})
+    assert r.status_code == 400 and "alignment" in r.json()["detail"]
+    with open(wav, "rb") as f:
+        r = client.post("/api/sessions", files={"audio": ("rap.wav", f, "audio/wav")},
+                        data={"lyrics": "pieni tähti", "lang": "fi", "align": "none", "style": "polka"})
+    assert r.status_code == 400
