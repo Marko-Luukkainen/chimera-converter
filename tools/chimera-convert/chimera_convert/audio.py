@@ -24,13 +24,14 @@ ROFORMER_LEAD = "mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt"
 
 
 def separate_vocals(path: str | Path, device: str, save_to: Path | None = None, log=print, method: str = "htdemucs",
-                    lead_only: bool = False) -> tuple[np.ndarray, int]:
+                    lead_only: bool = False, warn=None) -> tuple[np.ndarray, int]:
     """The vocal stem of a full mix, mono.
 
     method: "htdemucs" (Demucs, the default), "htdemucs_ft" (Demucs fine-tuned: cleaner vocals,
     about four times slower) or "roformer" (Mel-Band RoFormer, the cleanest; needs
     `pip install -r requirements-separator.txt`). lead_only: then the lead voice alone, without
-    backing vocals, doubles and ad-libs (a RoFormer karaoke model; needs the same package)."""
+    backing vocals, doubles and ad-libs (a RoFormer karaoke model; needs the same package).
+    `warn(message)` hears where the lead voice dropped most of the singing (`lead_losses`)."""
     if method not in SEPARATORS:
         raise ValueError(f"separator must be one of {', '.join(SEPARATORS)}")
     if method == "roformer":
@@ -38,7 +39,10 @@ def separate_vocals(path: str | Path, device: str, save_to: Path | None = None, 
     else:
         vocals, sr = _demucs(path, device, method, log)
     if lead_only:
-        vocals, sr = _lead(vocals, sr, log)
+        lead, sr2 = _lead(vocals, sr, log)
+        for msg in lead_losses(vocals.mean(0), lead.mean(0), sr2 if sr2 == sr else sr):
+            (warn or log)(msg)
+        vocals, sr = lead, sr2
     if save_to is not None:
         import soundfile as sf
 
@@ -69,6 +73,41 @@ def _demucs(path: str | Path, device: str, name: str, log) -> tuple[np.ndarray, 
     with torch.inference_mode():
         out = apply_model(model, ((x - mean) / std)[None], device=device, split=True, overlap=0.25, progress=True)[0]
     return (out[model.sources.index("vocals")] * std + mean).cpu().numpy(), sr
+
+
+def lead_losses(vocals: np.ndarray, lead: np.ndarray, sr: int, window: float = 10.0, keep: float = 0.5) -> list[str]:
+    """Where the lead voice kept less than `keep` of the singing (10 s windows, merged): a hook or
+    a choir sung by other voices is gone there, and its lyrics would be placed on what is left.
+
+    On a real rap song the karaoke model kept 98-99 % of the verses but 22 % and 40 % of the two
+    choruses (the hook is sung by other voices), and the chorus lyrics piled onto the ad-libs."""
+    import librosa
+
+    n = min(len(vocals), len(lead))
+    hop = int(sr * HOP_S)
+    rv = librosa.feature.rms(y=np.asarray(vocals[:n], np.float32), frame_length=4 * hop, hop_length=hop)[0]
+    rl = librosa.feature.rms(y=np.asarray(lead[:n], np.float32), frame_length=4 * hop, hop_length=hop)[0]
+    ref = rv.max() + 1e-12
+    dv, dl = 20 * np.log10(rv / ref + 1e-12), 20 * np.log10(rl / ref + 1e-12)
+    voice = dv > -30
+    kept = voice & (dl > dv - 10)
+    w = int(window / HOP_S)
+    spans: list[list[float]] = []
+    for a in range(0, len(voice), w):
+        v = voice[a:a + w].sum()
+        if v < 0.2 * w:  # too little singing here to judge
+            continue
+        k = kept[a:a + w].sum() / v
+        if k < keep:
+            t0, t1 = a * HOP_S, min(len(voice), a + w) * HOP_S
+            if spans and abs(spans[-1][1] - t0) < 1e-6:
+                spans[-1][1] = t1
+                spans[-1][2] = min(spans[-1][2], k)
+            else:
+                spans.append([t0, t1, k])
+    return [f"--lead-only dropped most of the voice at {a:.0f}-{b:.0f} s (kept {k * 100:.0f} %): other voices sing "
+            f"there (a hook, a choir). Leave those lines out of the lyrics, or convert without --lead-only."
+            for a, b, k in spans]
 
 
 def _models_dir() -> Path:

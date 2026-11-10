@@ -97,6 +97,8 @@ def main(argv: list[str] | None = None) -> int:
 
     an = pipeline.analyze_audio(a.audio, a.separate, device, a.pitch, out.with_suffix(".vocals.wav"), progress,
                                 voice_only=a.separate or a.voice_only, separator=a.separator, lead_only=a.lead_only)
+    for w in an.warnings:
+        pipeline.warn(w)
     sug = an.singing
     chosen = transcribe.Detection(sug.gate_db if a.gate is None else a.gate, sug.clarity if a.clarity is None else a.clarity,
                                   sug.rough if a.rough is None else a.rough, sug.hold if a.hold is None else a.hold)

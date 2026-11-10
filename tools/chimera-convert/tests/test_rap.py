@@ -266,3 +266,28 @@ def test_a_vowel_after_a_consonant_step_is_found_where_it_reaches_the_vowel():
     env2[(t >= 0.40) & (t < 0.45)] = -14.0
     r2 = rap.vowel_rises(env2, 4.0)
     assert len(r2) == 1 and abs(r2[0] - 0.45) <= 0.011, r2
+
+
+def test_lead_only_warns_where_a_hook_sung_by_other_voices_is_gone():
+    """The karaoke model kept a real rap's verses but only 22 % of its chorus (the hook is
+    other voices): the chorus lyrics then piled onto the ad-libs. Now it says where."""
+    sr = 16000
+    t = np.arange(40 * sr) / sr
+    vocals = 0.3 * np.sin(2 * np.pi * 220 * t)                  # 40 s of voice
+    lead = vocals.copy()
+    lead[(t >= 20) & (t < 30)] *= 0.01                          # the "chorus" gone from the lead
+    msgs = audio.lead_losses(vocals, lead, sr)
+    assert len(msgs) == 1 and "20-30 s" in msgs[0] and "kept 0 %" in msgs[0]
+    assert audio.lead_losses(vocals, vocals, sr) == []
+
+
+def test_a_word_with_no_syllable_is_reported_not_dropped_silently():
+    """In a Finnish song "MC" has no vowel, so it got no syllable and vanished from the melody
+    without a word (seen preparing a real rap's lyrics)."""
+    from chimera_convert.notes import Note
+
+    lyr = pipeline.prepare_lyrics("true MC sanoo", "fi")
+    assert [w.text for w in lyr.words if not w.syls] == ["MC"]
+    ns = [Note(0.5 + 0.3 * k, 0.8 + 0.3 * k, 50, k) for k in range(len(lyr.syl_word))]
+    mel = pipeline.build_melody(ns, lyr)
+    assert any("MC" in w for w in mel.warnings)

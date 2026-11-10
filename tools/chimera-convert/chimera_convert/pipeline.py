@@ -131,6 +131,8 @@ class Analysis:
     em: tuple | None = None
     """the alignment model's output (log-probabilities, frame length, vocab, blank), once computed"""
     duration: float = 0.0
+    warnings: list[str] = field(default_factory=list)
+    """what the separation found worth telling (audio.lead_losses)"""
     env: np.ndarray | None = None
     """the vowel band's energy every 5 ms (rap.vowel_envelope), for rap's sharper syllable onsets"""
 
@@ -179,10 +181,11 @@ def analyze_audio(path: Path, separate: bool, device: str, pitch_method: str | N
                   vocals_out: Path | None = None, progress: Progress = _quiet,
                   singing: "transcribe.Detection | None" = None, voice_only: bool | None = None,
                   separator: str = "htdemucs", lead_only: bool = False) -> Analysis:
+    warnings: list[str] = []
     if separate:
         progress("separating the voice", 0.0)
         voc, sr = audio.separate_vocals(path, device, save_to=vocals_out, log=lambda *_: None, method=separator,
-                                        lead_only=lead_only)
+                                        lead_only=lead_only, warn=warnings.append)
         import librosa
 
         y16 = librosa.resample(voc, orig_sr=sr, target_sr=16000)
@@ -202,7 +205,7 @@ def analyze_audio(path: Path, separate: bool, device: str, pitch_method: str | N
 
     an = Analysis(y16, np.zeros(0), np.zeros(0), pitch_method, vocals_out if separate else None, hz=hz, per=per, rms=rms,
                   voice_only=separate if voice_only is None else voice_only, duration=len(y16) / 16000,
-                  env=vowel_envelope(y16))
+                  warnings=warnings, env=vowel_envelope(y16))
     return retranscribe(an, singing)
 
 
@@ -338,6 +341,10 @@ def build_melody(ns: list[notes.Note], lyr: Lyrics, rest: float = 0.25, transpos
     ev, t0 = chimera.events(ns, rest, transpose, keep_cents)
     sounding = sum(1 for e in ev if e[0] > 0)
     warnings = []
+    silent = [w.text for w in lyr.words if not w.syls]
+    if silent:
+        warnings.append(f"no syllable in {', '.join(dict.fromkeys(silent))}: left out of the song; "
+                        "write them as they are said (MC -> äm-sii)")
     expected = len(lyr.syl_word) + sum(melismas.values())
     if sounding != expected:
         warnings.append(f"{sounding} notes for {expected} syllables")
