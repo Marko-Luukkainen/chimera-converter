@@ -88,6 +88,16 @@ def pick_vocals(files: list[str]) -> str:
     return hits[0]
 
 
+def missing_separator(e: ImportError) -> str:
+    """What to install when audio-separator doesn't import: the package itself, or a module it
+    needs but doesn't declare (audioread: librosa 1.0 no longer brings it)."""
+    name = (getattr(e, "name", None) or "").split(".")[0]
+    if name in ("", "audio_separator"):
+        return "the RoFormer separator needs audio-separator: pip install -r requirements-separator.txt"
+    return (f"audio-separator is installed but needs the module '{name}': pip install -r requirements-separator.txt "
+            f"(or pip install {name})")
+
+
 def _roformer(path: str | Path, model: str, log) -> tuple[np.ndarray, int]:
     """One audio-separator model on a file: its vocal stem (2, n) at 44.1 kHz."""
     import tempfile
@@ -95,7 +105,7 @@ def _roformer(path: str | Path, model: str, log) -> tuple[np.ndarray, int]:
     try:
         from audio_separator.separator import Separator
     except ImportError as e:
-        raise RuntimeError("the RoFormer separator needs audio-separator: pip install -r requirements-separator.txt") from e
+        raise RuntimeError(missing_separator(e)) from e
     with tempfile.TemporaryDirectory() as tmp:
         log(f"separating the voice (RoFormer {model}) ...")
         sep = Separator(model_file_dir=str(_models_dir()), output_dir=tmp, output_format="WAV")

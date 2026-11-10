@@ -155,9 +155,16 @@ The first run downloads the models: the MMS aligner, about 1.2 GB (Hugging Face)
 about 80 MB. They are cached.
 
 Optional, for cleaner vocals (`--separator roformer`) and the lead voice apart from backing vocals
-and ad-libs (`--lead-only`): `pip install -r requirements-separator.txt` (the audio-separator
-package; Mel-Band RoFormer models, a few hundred MB each on first use, cached in
-`%USERPROFILE%\.cache\chimera-convert\separator-models`).
+and ad-libs (`--lead-only`), the audio-separator package, with the same CUDA index as torch:
+
+```powershell
+pip install -r requirements-separator.txt --extra-index-url https://download.pytorch.org/whl/cu128
+```
+
+Without the index pip takes audio-separator's torchvision from PyPI, and with it a CPU torch in
+place of the CUDA one. The file pins torchvision for torch 2.11; for another torch, change it
+(torchvision 0.N+15 goes with torch 2.N). The Mel-Band RoFormer models download on first use and
+are cached in `%USERPROFILE%\.cache\chimera-convert\separator-models`.
 
 ## Command line
 

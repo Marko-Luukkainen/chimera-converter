@@ -235,3 +235,12 @@ def test_roformer_and_lead_voice_plumbing(tmp_path, monkeypatch):
     assert np.max(np.abs(y)) == pytest.approx(0.2, abs=0.01)  # through the "karaoke" model
     with pytest.raises(ValueError):
         audio.separate_vocals(src, "cpu", method="spleeter")
+
+
+def test_a_missing_separator_module_is_named():
+    """audio-separator imports audioread without declaring it: the message must name audioread,
+    not claim audio-separator itself is missing (it was installed on the test machine)."""
+    e = ModuleNotFoundError("No module named 'audioread'", name="audioread")
+    assert "audioread" in audio.missing_separator(e) and "is installed" in audio.missing_separator(e)
+    e = ModuleNotFoundError("No module named 'audio_separator'", name="audio_separator")
+    assert "needs audio-separator" in audio.missing_separator(e)
