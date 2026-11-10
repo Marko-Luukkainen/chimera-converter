@@ -112,6 +112,13 @@ branching (nasal tract, sinuses, piriform fossae, two bronchi, vocal sacs, OEC).
 * Calibration: optimise vowel targets against reference formants (Hillenbrand 1995 male
   means, plus cardinal vowels for non-English) with the chain-matrix model. Female/child
   via anatomical scaling (shorter pharynx proportion), not formant warping.
+* Two anatomies build the tract (`TractModel`, part of the body): the hand-built one above, and
+  a statistical contour model fitted to speech MRI (`anatomy/contour.rs`,
+  [tools/contour-model](../tools/contour-model/README.md)). The contour model replaces the
+  tongue's back and dorsum, the posterior pharyngeal wall, the hard palate and the soft palate's
+  shape with a Maeda-style guided linear model of five speakers' midsagittal MRI, driven by the
+  same articulators (jaw, tongue-body centre, root), and has its own vowel calibration. The tip,
+  blade, lips, teeth, jaw and larynx stay hand-built.
 * The body is continuous (`BodyMix`: a female axis and a child axis): anatomy, calibrated
   phoneme targets and default pitch blend the three calibrated bodies by weight. A body
   change rebuilds the airway (its node counts follow the tract length).

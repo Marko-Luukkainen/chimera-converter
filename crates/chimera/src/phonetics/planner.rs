@@ -8,7 +8,7 @@
 use super::durations::{SegInfo, finnish_durations, klatt_durations};
 use super::inventory::{Glottal, Manner, PhonemeDef, Voicing, dental_stop, phoneme};
 use super::{Intonation, Language, Plan, PlannedSegment, Segment};
-use crate::anatomy::human::{ArticKey, ArticPatch, BodyMix, BodyName};
+use crate::anatomy::human::{ArticKey, ArticPatch, BodyMix, BodyName, TractModel};
 use crate::control::score::{ControlKey, Gesture, Targets};
 use crate::math::{js_max, js_min, js_round};
 use serde::{Deserialize, Serialize};
@@ -45,6 +45,18 @@ pub fn vowel_table() -> &'static VowelTable {
 pub fn fi_vowel_table() -> &'static VowelTable {
     static T: OnceLock<VowelTable> = OnceLock::new();
     T.get_or_init(|| serde_json::from_str(include_str!("vowelTargets.fi.generated.json")).expect("vowelTargets.fi.generated.json"))
+}
+
+/// The vowels calibrated for the MRI contour anatomy (`chimera calibrate vowels --contour`).
+pub fn contour_vowel_table() -> &'static VowelTable {
+    static T: OnceLock<VowelTable> = OnceLock::new();
+    T.get_or_init(|| serde_json::from_str(include_str!("vowelTargets.contour.generated.json")).expect("vowelTargets.contour.generated.json"))
+}
+
+/// The Finnish vowels calibrated for the MRI contour anatomy (`--fi --contour`).
+pub fn contour_fi_vowel_table() -> &'static VowelTable {
+    static T: OnceLock<VowelTable> = OnceLock::new();
+    T.get_or_init(|| serde_json::from_str(include_str!("vowelTargets.fi.contour.generated.json")).expect("vowelTargets.fi.contour.generated.json"))
 }
 
 /// Diphthongs and r-coloured vowels expand to vowel sequences. American /eɪ oʊ/ glide toward
@@ -104,18 +116,25 @@ pub fn is_vowel(ipa: &str, body: BodyMix) -> bool {
 }
 
 /// The calibrated articulation of a vowel for a body: between presets, the presets' calibrated
-/// articulations blended by the body's weights.
+/// articulations blended by the body's weights. The contour anatomy takes its own calibration
+/// first, the classic one where it has none.
 pub fn vowel_artic(ipa: &str, body: BodyMix) -> Option<ArticPatch> {
+    if body.model == TractModel::Contour
+        && let Some(v) = table_vowel_artic(contour_vowel_table(), ipa, body)
+    {
+        return Some(v);
+    }
     table_vowel_artic(vowel_table(), ipa, body)
 }
 
 /// [`vowel_artic`] for a language: a Finnish vowel calibrated to Finnish references when the
 /// Finnish table has it.
 pub fn vowel_artic_in(ipa: &str, body: BodyMix, language: Language) -> Option<ArticPatch> {
-    if language == Language::Finnish
-        && let Some(v) = table_vowel_artic(fi_vowel_table(), ipa, body)
-    {
-        return Some(v);
+    if language == Language::Finnish {
+        let fi = if body.model == TractModel::Contour { contour_fi_vowel_table() } else { fi_vowel_table() };
+        if let Some(v) = table_vowel_artic(fi, ipa, body) {
+            return Some(v);
+        }
     }
     vowel_artic(ipa, body)
 }
@@ -159,6 +178,8 @@ fn preset_vowel_artic(t: &VowelTable, ipa: &str, body: BodyName) -> Option<Artic
 pub fn init() {
     vowel_table();
     fi_vowel_table();
+    contour_vowel_table();
+    contour_fi_vowel_table();
     super::inventory::init();
 }
 

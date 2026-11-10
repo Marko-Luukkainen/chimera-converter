@@ -20,7 +20,7 @@ import { playDemo, playSong, useSing, DEMO_SONGS } from "./singing.ts";
 import type { Mode } from "./store.ts";
 import type { BodyName } from "../worklet/protocol.ts";
 import { BodyPad } from "./components/BodyPad.tsx";
-import { bodyLabel, presetOf, PRESETS } from "./body.ts";
+import { bodyLabel, presetOf, PRESETS, tractModel, type TractModel } from "./body.ts";
 
 // three.js only loads when the 3D view is first shown
 const AnatomyView3D = lazy(() => import("./components/AnatomyView3D.tsx").then((m) => ({ default: m.AnatomyView3D })));
@@ -80,6 +80,15 @@ function TopBar() {
             ]}
           />
           <BodyPad />
+          <Segmented<TractModel>
+            label="Anatomy: the hand-built tract, or the statistical contour model fitted to speech MRI"
+            value={tractModel(body)}
+            onChange={(model) => setBody({ ...body, model })}
+            options={[
+              { value: "classic", label: "Classic" },
+              { value: "contour", label: "MRI" },
+            ]}
+          />
         </div>
       )}
       <div className="topbar-right">

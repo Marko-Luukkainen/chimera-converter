@@ -213,6 +213,31 @@ pub fn catmull_rom(pts: &[Vec2], per: usize) -> Vec<Vec2> {
     out
 }
 
+/// [`catmull_rom`] into `out` (cleared first), allocating nothing once `out` has room.
+pub fn catmull_rom_into(pts: &[Vec2], per: usize, out: &mut Vec<Vec2>) {
+    out.clear();
+    if pts.len() < 3 {
+        out.extend_from_slice(pts);
+        return;
+    }
+    for i in 0..pts.len() - 1 {
+        let p0 = pts[i.saturating_sub(1)];
+        let p1 = pts[i];
+        let p2 = pts[i + 1];
+        let p3 = pts[(i + 2).min(pts.len() - 1)];
+        for k in 0..per {
+            let t = k as f64 / per as f64;
+            let t2 = t * t;
+            let t3 = t2 * t;
+            out.push(v(
+                0.5 * (2.0 * p1.x + (-p0.x + p2.x) * t + (2.0 * p0.x - 5.0 * p1.x + 4.0 * p2.x - p3.x) * t2 + (-p0.x + 3.0 * p1.x - 3.0 * p2.x + p3.x) * t3),
+                0.5 * (2.0 * p1.y + (-p0.y + p2.y) * t + (2.0 * p0.y - 5.0 * p1.y + 4.0 * p2.y - p3.y) * t2 + (-p0.y + 3.0 * p1.y - 3.0 * p2.y + p3.y) * t3),
+            ));
+        }
+    }
+    out.push(pts[pts.len() - 1]);
+}
+
 /// Upper (or lower) tangent point from external point p to circle (c, r): its angle on the circle.
 pub fn tangent_angle(c: Vec2, r: f64, p: Vec2, upper: bool) -> Option<f64> {
     let d = dist(c, p);

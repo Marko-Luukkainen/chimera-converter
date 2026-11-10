@@ -12,6 +12,10 @@ This repository is [CHIMERA](https://github.com/jamesondh/chimera-vocal-synth) b
   tracking, lyrics alignment, a check of what counts as singing, and a piano-roll editor app.
 - **Live songs**: Sing mode plays a converted song with live voice controls; the duet page
   (`?show=<id>`) sings it live with a voice panel (character, body, vibrato, tone, grit).
+- **MRI anatomy** ([tools/contour-model](tools/contour-model/README.md)): a second anatomy, picked
+  with **MRI** beside the body: a statistical contour model of the tongue, pharyngeal wall, palate
+  and soft palate fitted to real-time speech MRI of five speakers (Ruthven et al. 2023, CC BY 4.0),
+  with its own vowel calibration.
 - **Windows install**: `install_from_github.bat` (from this repository) and
   `transfer_to_another_pc.bat` (a working copy with its songs, to another machine).
 

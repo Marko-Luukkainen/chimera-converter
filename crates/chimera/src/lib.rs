@@ -14,6 +14,7 @@ pub mod airway {
 }
 
 pub mod anatomy {
+    pub mod contour;
     pub mod geom;
     pub mod human;
 }
@@ -53,6 +54,7 @@ pub mod phonetics;
 /// initialises lazily on an audio thread later.
 pub fn init() {
     phonetics::planner::init();
+    anatomy::contour::init();
     phonetics::inventory::init();
     phonetics::beatbox::init();
     phonetics::ipa::init();

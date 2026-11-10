@@ -14,7 +14,8 @@
 //! Real time: `compute` writes into a caller's [`HumanFrame`] and keeps every temporary in the
 //! tract's own buffers, so a voice computing a frame per control step allocates nothing once warm.
 
-use super::geom::{Polyline, Vec2, add, arc, bezier2, bezier3, catmull_rom, dist, lerp_v, norm, polar, ray_crossings, ray_polyline, rotate_about, scale, sub, tangent_angle, v};
+use super::contour::{self, ContourModel, N_LINES, N_PHAR, VelumShape};
+use super::geom::{Polyline, Vec2, add, arc, bezier2, bezier3, catmull_rom, catmull_rom_into, dist, lerp_v, norm, polar, ray_crossings, ray_polyline, rotate_about, scale, sub, tangent_angle, v};
 use crate::math::{PI, atan2, clamp, cos, hypot, js_max, js_min, lerp, pow, sin, smoothstep, sqrt};
 use serde::{Deserialize, Serialize};
 
@@ -259,6 +260,28 @@ impl<'de> Deserialize<'de> for ArticPatch {
     }
 }
 
+/// Which anatomy builds the tract: the hand-built one (the default) or the statistical contour
+/// model fitted to speech MRI (`contour.rs`), whose tongue, walls and soft palate come from data.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TractModel {
+    #[default]
+    Classic,
+    Contour,
+}
+
+impl TractModel {
+    pub fn is_classic(&self) -> bool {
+        *self == TractModel::Classic
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TractModel::Classic => "classic",
+            TractModel::Contour => "contour",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HumanBody {
@@ -271,17 +294,28 @@ pub struct HumanBody {
     pub tongue_radius: f64,
     /// max lip width (cm, before scale)
     pub lip_width: f64,
+    /// the anatomy that builds the tract
+    #[serde(skip_serializing_if = "TractModel::is_classic")]
+    pub model: TractModel,
 }
 
-pub const BODY_MALE: HumanBody = HumanBody { name: "Adult male", scale: 1.0, pharynx: 1.0, tongue_radius: 2.25, lip_width: 4.6 };
-pub const BODY_FEMALE: HumanBody = HumanBody { name: "Adult female", scale: 0.9, pharynx: 0.88, tongue_radius: 2.2, lip_width: 4.4 };
-pub const BODY_CHILD: HumanBody = HumanBody { name: "Child", scale: 0.74, pharynx: 0.8, tongue_radius: 2.15, lip_width: 4.0 };
+impl HumanBody {
+    /// This body built by another anatomy.
+    pub const fn with_model(mut self, model: TractModel) -> HumanBody {
+        self.model = model;
+        self
+    }
+}
+
+pub const BODY_MALE: HumanBody = HumanBody { name: "Adult male", scale: 1.0, pharynx: 1.0, tongue_radius: 2.25, lip_width: 4.6, model: TractModel::Classic };
+pub const BODY_FEMALE: HumanBody = HumanBody { name: "Adult female", scale: 0.9, pharynx: 0.88, tongue_radius: 2.2, lip_width: 4.4, model: TractModel::Classic };
+pub const BODY_CHILD: HumanBody = HumanBody { name: "Child", scale: 0.74, pharynx: 0.8, tongue_radius: 2.15, lip_width: 4.0, model: TractModel::Classic };
 /// A Neanderthal man (La Ferrassie 1 sized): a larger head and a long mouth over a relatively
 /// short pharynx (the "long mouth, short neck" of the reconstructions; Lieberman & Crelin 1971
 /// put the larynx higher still, Boë et al. 2002 showed the vowel space need not shrink for it).
 /// The pharynx factor stays within the calibrated bodies' range (the female's), so the adult
 /// male's articulations, which this body borrows, still close and open where they should.
-pub const BODY_NEANDERTHAL: HumanBody = HumanBody { name: "Neanderthal", scale: 1.06, pharynx: 0.88, tongue_radius: 2.25, lip_width: 4.9 };
+pub const BODY_NEANDERTHAL: HumanBody = HumanBody { name: "Neanderthal", scale: 1.06, pharynx: 0.88, tongue_radius: 2.25, lip_width: 4.9, model: TractModel::Classic };
 
 /// The human bodies by their short names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -340,21 +374,27 @@ fn is_zero(x: &f64) -> bool {
 /// body-dependent (the anatomy, the calibrated phoneme targets, the default pitch) blends with
 /// these weights; at a preset it is exactly that preset.
 ///
-/// Deserializes from a preset name (`"female"`) or `{ "female": f, "child": c, "neanderthal": n }`
-/// (`neanderthal` optional, and left out when it is 0, so older files and goldens are unchanged).
+/// Deserializes from a preset name (`"female"`, or `"female/contour"` for the MRI contour anatomy)
+/// or `{ "female": f, "child": c, "neanderthal": n, "model": "contour" }` (`neanderthal` and
+/// `model` optional, and left out when 0 / classic, so older files and goldens are unchanged).
+///
+/// `model` picks the anatomy ([`TractModel`]); it is not blended. The contour anatomy has its own
+/// calibrated vowel tables.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
 pub struct BodyMix {
     pub female: f64,
     pub child: f64,
     #[serde(skip_serializing_if = "is_zero")]
     pub neanderthal: f64,
+    #[serde(skip_serializing_if = "TractModel::is_classic")]
+    pub model: TractModel,
 }
 
 impl BodyMix {
-    pub const MALE: BodyMix = BodyMix { female: 0.0, child: 0.0, neanderthal: 0.0 };
-    pub const FEMALE: BodyMix = BodyMix { female: 1.0, child: 0.0, neanderthal: 0.0 };
-    pub const CHILD: BodyMix = BodyMix { female: 0.0, child: 1.0, neanderthal: 0.0 };
-    pub const NEANDERTHAL: BodyMix = BodyMix { female: 0.0, child: 0.0, neanderthal: 1.0 };
+    pub const MALE: BodyMix = BodyMix { female: 0.0, child: 0.0, neanderthal: 0.0, model: TractModel::Classic };
+    pub const FEMALE: BodyMix = BodyMix { female: 1.0, child: 0.0, neanderthal: 0.0, model: TractModel::Classic };
+    pub const CHILD: BodyMix = BodyMix { female: 0.0, child: 1.0, neanderthal: 0.0, model: TractModel::Classic };
+    pub const NEANDERTHAL: BodyMix = BodyMix { female: 0.0, child: 0.0, neanderthal: 1.0, model: TractModel::Classic };
 
     /// A modern human body, clamped to 0..1 (non-finite values count as 0).
     pub fn new(female: f64, child: f64) -> BodyMix {
@@ -364,17 +404,23 @@ impl BodyMix {
     /// Any body, clamped to 0..1 (non-finite values count as 0).
     pub fn with_neanderthal(female: f64, child: f64, neanderthal: f64) -> BodyMix {
         let c = |x: f64| if x.is_finite() { clamp(x, 0.0, 1.0) } else { 0.0 };
-        BodyMix { female: c(female), child: c(child), neanderthal: c(neanderthal) }
+        BodyMix { female: c(female), child: c(child), neanderthal: c(neanderthal), model: TractModel::Classic }
+    }
+
+    /// This body built by another anatomy.
+    pub const fn with_model(mut self, model: TractModel) -> BodyMix {
+        self.model = model;
+        self
     }
 
     /// This body with every axis clamped.
     pub fn clamped(self) -> BodyMix {
-        BodyMix::with_neanderthal(self.female, self.child, self.neanderthal)
+        BodyMix::with_neanderthal(self.female, self.child, self.neanderthal).with_model(self.model)
     }
 
     /// Weights of male, female, child and Neanderthal (they sum to 1).
     pub fn weights(self) -> [(BodyName, f64); 4] {
-        let BodyMix { female: f, child: c, neanderthal: n } = self.clamped();
+        let BodyMix { female: f, child: c, neanderthal: n, .. } = self.clamped();
         [(BodyName::Male, (1.0 - n) * (1.0 - c) * (1.0 - f)), (BodyName::Female, (1.0 - n) * (1.0 - c) * f), (BodyName::Child, (1.0 - n) * c), (BodyName::Neanderthal, n)]
     }
 
@@ -406,7 +452,7 @@ impl BodyMix {
     /// The blended anatomy (named after the nearest preset).
     pub fn body(self) -> HumanBody {
         if let Some(b) = self.preset() {
-            return b.body();
+            return b.body().with_model(self.model);
         }
         HumanBody {
             name: self.nearest().body().name,
@@ -414,6 +460,7 @@ impl BodyMix {
             pharynx: self.blend(|b| b.body().pharynx),
             tongue_radius: self.blend(|b| b.body().tongue_radius),
             lip_width: self.blend(|b| b.body().lip_width),
+            model: self.model,
         }
     }
 }
@@ -430,8 +477,13 @@ impl From<BodyName> for BodyMix {
 }
 
 impl From<&str> for BodyMix {
+    /// A preset name, optionally with the anatomy after a slash (`"female/contour"`).
     fn from(s: &str) -> BodyMix {
-        BodyName::parse(s).into()
+        match s.split_once('/') {
+            Some((name, "contour")) => BodyMix::from(BodyName::parse(name)).with_model(TractModel::Contour),
+            Some((name, _)) => BodyName::parse(name).into(),
+            None => BodyName::parse(s).into(),
+        }
     }
 }
 
@@ -448,11 +500,13 @@ impl<'de> Deserialize<'de> for BodyMix {
                 child: f64,
                 #[serde(default)]
                 neanderthal: f64,
+                #[serde(default)]
+                model: TractModel,
             },
         }
         Ok(match Wire::deserialize(d)? {
             Wire::Name(s) => BodyMix::from(s.as_str()),
-            Wire::Mix { female, child, neanderthal } => BodyMix::with_neanderthal(female, child, neanderthal),
+            Wire::Mix { female, child, neanderthal, model } => BodyMix::with_neanderthal(female, child, neanderthal).with_model(model),
         })
     }
 }
@@ -600,6 +654,10 @@ struct Scratch {
     cum: Vec<f64>,
     tip_pts: Vec<Vec2>,
     outline: Polyline,
+    /// contour anatomy: the tongue on the measuring lines, mapped to this body, and smoothed
+    contour_s: [f64; N_LINES],
+    contour_ctl: Vec<Vec2>,
+    contour_smooth: Vec<Vec2>,
 }
 
 /// Room reserved in every point buffer: the outlines' lengths vary with the posture (how much of
@@ -632,6 +690,9 @@ impl Scratch {
             cum: Vec::with_capacity(POINTS),
             tip_pts: pts(),
             outline: line(),
+            contour_s: [0.0; N_LINES],
+            contour_ctl: pts(),
+            contour_smooth: pts(),
         }
     }
 }
@@ -678,7 +739,13 @@ pub struct HumanVocalTract {
     pub contact_tip_n: Vec2,
     pub contact_body_n: Vec2,
     pub area_law: AreaLaw,
+    /// the contour anatomy's model (None: the classic anatomy)
+    contour: Option<&'static ContourModel>,
+    velum_shape: Option<VelumShape>,
 }
+
+/// Points of the contour model's tongue per measuring line once smoothed.
+const CONTOUR_PER: usize = 3;
 
 impl HumanVocalTract {
     pub fn new(body: HumanBody) -> Self {
@@ -698,6 +765,8 @@ impl HumanVocalTract {
             contact_tip_n: v(0.0, -1.0),
             contact_body_n: v(0.0, -1.0),
             area_law: AreaLaw { pharynx: (2.0, 1.4), oral: (2.6, 1.4), front: (2.0, 1.4), ahead: (1.6, 1.4) },
+            contour: None,
+            velum_shape: None,
         };
         let p = |x: f64, y: f64| t.p(x, y);
         // posterior pharyngeal wall, bottom → top (curving forward into nasopharynx roof)
@@ -708,6 +777,17 @@ impl HumanVocalTract {
         let polar_c = p(2.6, 6.95);
         let polar_c2 = p(5.0, 6.85);
         let nasal_cavity = catmull_rom(&[pns, p(2.5, 10.8), p(5.0, 11.2), p(7.3, 10.6), p(8.0, 10.1)], 4);
+        let (phar_wall, palate) = if body.model == TractModel::Contour {
+            // the MRI walls (adult male frame) mapped to this body
+            let cm = contour::model();
+            t.contour = Some(cm);
+            t.velum_shape = Some(cm.velum);
+            let wall: Vec<Vec2> = cm.phar_wall_points().into_iter().map(|q| t.from_male(q)).collect();
+            let pal: Vec<Vec2> = cm.palate_points().into_iter().map(|q| t.from_male(q)).collect();
+            (catmull_rom(&wall, 2), catmull_rom(&pal, 2))
+        } else {
+            (phar_wall, palate)
+        };
         t.phar_wall = phar_wall;
         t.pns = pns;
         t.palate = palate;
@@ -728,6 +808,19 @@ impl HumanVocalTract {
         let xx = if x > 0.5 { 0.5 + (x - 0.5) * 0.86 } else { x };
         let yy = if y < 7.0 { 7.0 - (7.0 - y) * ph } else { y };
         v(xx * k, yy * k)
+    }
+
+    /// A point of the adult male body frame (the contour model's) in this body: back to the
+    /// template, then through `p()`.
+    #[inline]
+    pub fn from_male(&self, q: Vec2) -> Vec2 {
+        let x = if q.x > 0.5 { 0.5 + (q.x - 0.5) / 0.86 } else { q.x };
+        self.p(x, q.y)
+    }
+
+    /// The anatomy that builds this tract.
+    pub fn model(&self) -> TractModel {
+        self.body.model
     }
 
     /// Inverse of `p()`: body coordinates → template coordinates (for direct manipulation).
@@ -777,8 +870,15 @@ impl HumanVocalTract {
 
         // ---- velum flap from PNS; angle from port area
         let v_open = clamp(a.velum / 1.2, 0.0, 1.0);
-        let v_ang = (194.0 + 46.0 * v_open) * DEG;
-        let v_len = 2.8 * k;
+        let vs = self.velum_shape;
+        let v_ang = match vs {
+            Some(vs) => (vs.angle_closed + (vs.angle_open - vs.angle_closed) * v_open) * DEG,
+            None => (194.0 + 46.0 * v_open) * DEG,
+        };
+        let v_len = match vs {
+            Some(vs) => vs.length * k,
+            None => 2.8 * k,
+        };
         sc.vel.clear();
         sc.vel_oral.clear();
         sc.vel_nasal.clear();
@@ -787,7 +887,10 @@ impl HumanVocalTract {
             let sag = sin(s * PI) * k * (0.3 * v_open - 0.12);
             let c = add(polar(self.pns, v_len * s, v_ang), v(0.0, -sag));
             let nrm = v(-sin(v_ang), cos(v_ang)); // oral-side normal (forward-down)
-            let th = (0.48 - 0.2 * s) * k;
+            let th = match vs {
+                Some(vs) => (vs.half_root + (vs.half_tip - vs.half_root) * s) * k,
+                None => (0.48 - 0.2 * s) * k,
+            };
             sc.vel_oral.push(add(c, scale(nrm, th)));
             sc.vel_nasal.push(sub(c, scale(nrm, th)));
             sc.vel.push(c);
@@ -855,35 +958,99 @@ impl HumanVocalTract {
         let r = self.body.tongue_radius * k;
         let b = this.p(a.tb_x, a.tb_y);
         let b0 = this.p(NEUTRAL.tb_x, NEUTRAL.tb_y);
-        let vallecula = add(this.p(0.75, 3.3), v(0.45 * (b.x - b0.x) + a.root * k, 0.3 * (b.y - b0.y) + 0.55 * lar));
+        let mut vallecula = add(this.p(0.75, 3.3), v(0.45 * (b.x - b0.x) + a.root * k, 0.3 * (b.y - b0.y) + 0.55 * lar));
+        if let Some(cm) = self.contour {
+            // contour anatomy: the MRI model's tongue on its measuring lines, mapped to this body;
+            // the larynx carries the lowest lines' points up as it carries the vallecula
+            cm.distances(a, &mut sc.contour_s);
+            sc.contour_ctl.clear();
+            let span = contour::ORAL_C.y - contour::PHAR_Y[0];
+            for i in 0..N_LINES {
+                let mut q = this.from_male(contour::point(i, sc.contour_s[i]));
+                if i < N_PHAR {
+                    q.y += 0.55 * lar * (contour::ORAL_C.y - contour::PHAR_Y[i]) / span;
+                }
+                sc.contour_ctl.push(q);
+            }
+            catmull_rom_into(&sc.contour_ctl, CONTOUR_PER, &mut sc.contour_smooth);
+            // the vallecula sits under the root's lowest point (the MRI pharynx is deeper than the
+            // classic one, and the classic vallecula left a shelf under the root)
+            let c0 = sc.contour_smooth[0];
+            vallecula = v(c0.x + 0.1 * k, js_min(vallecula.y, c0.y - 0.3 * k));
+        }
         let epi_base = add(this.p(0.3, 2.4), v(0.0, lar));
         let epi_tip = add(this.p(0.0, 4.5), v(0.35 * (vallecula.x - 0.75 * k), lar * 0.8 + 0.15 * (b.y - b0.y)));
-        let th_b = 200.0 * DEG;
-        let p_b = polar(b, r, th_b);
-        let tan_b = v(sin(th_b), -cos(th_b));
-        let h_r = dist(vallecula, p_b) / 3.0;
-        bezier3(vallecula, add(vallecula, v(0.08 * k, h_r)), sub(p_b, scale(tan_b, h_r)), p_b, 9, &mut sc.root);
+        let p_f;
+        let tan_f;
         let mut tip = this.p(a.tt_x, a.tt_y);
-        // keep tip outside the body circle
-        let d_t = dist(tip, b);
-        if d_t < r * 1.05 {
-            tip = add(b, scale(norm(sub(tip, b)), r * 1.05));
+        if self.contour.is_some() {
+            let sm = &sc.contour_smooth;
+            // root: the classic curve from the vallecula up to the lowest line (the MRI field ends
+            // above the vallecula), meeting the contour along its own direction
+            let c0 = sm[0];
+            let t0 = norm(sub(sm[1], c0));
+            let h_r = dist(vallecula, c0) / 3.0;
+            bezier3(vallecula, add(vallecula, v(0.08 * k, h_r)), sub(c0, scale(t0, h_r)), c0, 9, &mut sc.root);
+            let split = N_PHAR * CONTOUR_PER;
+            sc.root.extend_from_slice(&sm[1..=split]);
+            // The dorsum, from the line straight back to where the blade leaves it for the tip. A
+            // fixed end (the last line) folded the blade back over the dorsum when the tip rose
+            // above a low tongue (/ɑ/ to a raised tip jumped 0.3 cm²): it ends where the classic
+            // tongue's arc would, at the polar angle (seen from the lines' centre) of the classic
+            // circle's tangent point towards the tip, and the dorsum up to there is sampled at a
+            // fixed number of points along the lines' distances, interpolated over the angle.
+            let d_t = dist(tip, b);
+            if d_t < r * 1.05 {
+                tip = add(b, scale(norm(sub(tip, b)), r * 1.05));
+            }
+            let th_t = match tangent_angle(b, r, tip, true) {
+                Some(x) => x,
+                None => atan2(tip.y - b.y, tip.x - b.x),
+            };
+            let q = this.to_male(polar(b, r, th_t));
+            let mut cut = atan2(q.y - contour::ORAL_C.y, q.x - contour::ORAL_C.x) / DEG;
+            if cut < -90.0 {
+                cut += 360.0;
+            }
+            let last = contour::ORAL_DEG[contour::ORAL_DEG.len() - 1];
+            let cut = clamp(cut, last, 170.0);
+            sc.arc_pts.clear();
+            for i in 0..ARC_POINTS {
+                let deg = 180.0 + (cut - 180.0) * i as f64 / (ARC_POINTS - 1) as f64;
+                let s_at = contour::oral_distance(&sc.contour_s, deg);
+                let ang = deg * DEG;
+                sc.arc_pts.push(this.from_male(add(contour::ORAL_C, v(s_at * cos(ang), s_at * sin(ang)))));
+            }
+            let n = sc.arc_pts.len();
+            p_f = sc.arc_pts[n - 1];
+            tan_f = norm(sub(sc.arc_pts[n - 1], sc.arc_pts[n - 2]));
+        } else {
+            let th_b = 200.0 * DEG;
+            let p_b = polar(b, r, th_b);
+            let tan_b = v(sin(th_b), -cos(th_b));
+            let h_r = dist(vallecula, p_b) / 3.0;
+            bezier3(vallecula, add(vallecula, v(0.08 * k, h_r)), sub(p_b, scale(tan_b, h_r)), p_b, 9, &mut sc.root);
+            // keep tip outside the body circle
+            let d_t = dist(tip, b);
+            if d_t < r * 1.05 {
+                tip = add(b, scale(norm(sub(tip, b)), r * 1.05));
+            }
+            let mut th_f = match tangent_angle(b, r, tip, true) {
+                Some(x) => x,
+                None => atan2(tip.y - b.y, tip.x - b.x),
+            };
+            // arc runs from thB (200°) decreasing to thF
+            while th_f > th_b {
+                th_f -= 2.0 * PI;
+            }
+            while th_f < th_b - 2.0 * PI {
+                th_f += 2.0 * PI;
+            }
+            // a fixed number of points: a count that changed with the angle re-spaced every vertex at once
+            arc(b, r, th_b, th_f, ARC_POINTS, &mut sc.arc_pts);
+            p_f = sc.arc_pts[sc.arc_pts.len() - 1];
+            tan_f = v(sin(th_f), -cos(th_f)); // direction of decreasing angle
         }
-        let mut th_f = match tangent_angle(b, r, tip, true) {
-            Some(x) => x,
-            None => atan2(tip.y - b.y, tip.x - b.x),
-        };
-        // arc runs from thB (200°) decreasing to thF
-        while th_f > th_b {
-            th_f -= 2.0 * PI;
-        }
-        while th_f < th_b - 2.0 * PI {
-            th_f += 2.0 * PI;
-        }
-        // a fixed number of points: a count that changed with the angle re-spaced every vertex at once
-        arc(b, r, th_b, th_f, ARC_POINTS, &mut sc.arc_pts);
-        let p_f = sc.arc_pts[sc.arc_pts.len() - 1];
-        let tan_f = v(sin(th_f), -cos(th_f)); // direction of decreasing angle
         // blade: quadratic from the tangent point to the tip; curl lifts the tip and turns it back
         let bl = dist(p_f, tip);
         let curl = clamp(a.tt_curl, 0.0, 1.0);
@@ -1422,6 +1589,29 @@ impl HumanVocalTractView {
         let xx = if x > 0.5 { 0.5 + (x - 0.5) * 0.86 } else { x };
         let yy = if y < 7.0 { 7.0 - (7.0 - y) * ph } else { y };
         v(xx * k, yy * k)
+    }
+
+    /// See [`HumanVocalTract::from_male`].
+    #[inline]
+    fn from_male(&self, q: Vec2) -> Vec2 {
+        let x = if q.x > 0.5 { 0.5 + (q.x - 0.5) / 0.86 } else { q.x };
+        self.p(x, q.y)
+    }
+
+    /// Inverse of [`Self::from_male`]: a point of this body in the adult male body frame.
+    #[inline]
+    fn to_male(&self, q: Vec2) -> Vec2 {
+        let k = self.k;
+        let ph = self.body.pharynx;
+        let (mut x, mut y) = (q.x / k, q.y / k);
+        if x > 0.5 {
+            x = 0.5 + (x - 0.5) / 0.86;
+        }
+        if y < 7.0 {
+            y = 7.0 - (7.0 - y) / ph;
+        }
+        // template → male body
+        v(if x > 0.5 { 0.5 + (x - 0.5) * 0.86 } else { x }, y)
     }
 }
 

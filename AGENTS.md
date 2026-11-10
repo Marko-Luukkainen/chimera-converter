@@ -33,7 +33,8 @@ and the CLI) under a React UI. See the README.
   `CHIMERA_BLESS=1 cargo test --workspace --no-fail-fast`, run twice. Human-voice audio, plans
   (including the beat sounds' gestures and the beat player), the tract geometry and the human
   airway's transfer functions re-bless; see `crates/chimera/tests/golden/README.md` for the rest.
-- **`*.generated.json` tables are regenerated (`chimera calibrate`, `tools/gen-*`), never edited.**
+- **`*.generated.json` tables are regenerated (`chimera calibrate`, `chimera anatomy fit`,
+  `tools/gen-*`), never edited.**
   Vowel calibration isn't bit-reproducible, so rerun it only when the formants should move.
 - **`src/wasm/chimera.wasm` is a gitignored build product.** After a Rust change, `bun test tests`
   alone tests the old engine: use `bun run test`. Don't share a cargo `target/` between checkouts.
@@ -53,4 +54,4 @@ and the CLI) under a React UI. See the README.
 | anything | `bun run test` and `bun run typecheck` |
 | `crates/chimera/` sound | re-bless goldens (above); `cargo run --release -q -p chimera --example bench` against the previous commit |
 | `crates/chimera-wasm/`, `src/wasm/`, `src/worklet/`, `src/main.tsx` | `bun run build && bun run preview`, then `bun tools/e2e.ts` |
-| `src/ui/`, `src/show/`, CSS | `bun run lint:layout` |
+| `src/ui/`, `src/show/`, CSS | `bun run lint:layout`; the anatomy switch: `bun tools/e2e-anatomy.ts` against `bun run preview` |

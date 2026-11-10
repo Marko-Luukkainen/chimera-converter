@@ -83,7 +83,7 @@ pub fn speech(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let text = arg(a, 1, "ˈɑpɑ");
     let body_name = arg(a, 2, "male");
     let b = body(body_name)?;
-    let f0 = match body_name {
+    let f0 = match body_name.trim_end_matches("/contour") {
         "female" => 200.0,
         "neanderthal" => 100.0,
         "child" => 250.0,
@@ -157,7 +157,7 @@ fn render_phrases(
     language: Language,
 ) -> Result<(), String> {
     let b = body(body_name)?;
-    let f0 = match body_name {
+    let f0 = match body_name.trim_end_matches("/contour") {
         "female" => 205.0,
         "neanderthal" => 100.0,
         "child" => 250.0,
@@ -240,7 +240,7 @@ pub fn song(ctx: &Ctx, a: &[String]) -> Result<(), String> {
             Some(Language::Finnish) => chimera::phonetics::finnish::lyrics_to_syllables(song.lyrics),
             _ => lyrics_to_syllables(song.lyrics, &g),
         };
-        let octave = match body_name {
+        let octave = match body_name.trim_end_matches("/contour") {
             "female" => song.octave.female,
             "child" => song.octave.child,
             _ => song.octave.male,
@@ -843,7 +843,7 @@ pub fn vowels(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let b = body(body_name)?;
     let default_out = format!("out/vowels-{body_name}");
     let name = arg(a, 1, &default_out);
-    let f0 = match body_name {
+    let f0 = match body_name.trim_end_matches("/contour") {
         "female" => 205.0,
         "neanderthal" => 100.0,
         "child" => 260.0,
