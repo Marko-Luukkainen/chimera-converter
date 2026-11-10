@@ -22,6 +22,7 @@ const FI_VOWEL_TABLE: &str = "crates/chimera/src/phonetics/vowelTargets.fi.gener
 const CONTOUR_VOWEL_TABLE: &str = "crates/chimera/src/phonetics/vowelTargets.contour.generated.json";
 const CONTOUR_FI_VOWEL_TABLE: &str = "crates/chimera/src/phonetics/vowelTargets.fi.contour.generated.json";
 const CONSONANT_TABLE: &str = "crates/chimera/src/phonetics/consonantTargets.generated.json";
+const CONTOUR_CONSONANT_TABLE: &str = "crates/chimera/src/phonetics/consonantTargets.contour.generated.json";
 const BODIES: [(&str, HumanBody); 3] = [
     ("male", BODY_MALE),
     ("female", BODY_FEMALE),
@@ -361,6 +362,10 @@ pub fn vowels(a: &[String]) -> Result<(), String> {
 /// (adult-male target × body scale²) in an /a/-like context: bisection on the monotonic contact
 /// model. Reads the vowel table (its /ɑ/) from disk. `calibrate consonants [--out file]`
 pub fn consonants(a: &[String]) -> Result<(), String> {
+    if a.iter().any(|x| x == "--contour") {
+        let a: Vec<String> = a.iter().filter(|x| *x != "--contour").cloned().collect();
+        return consonants_contour(&a);
+    }
     let (_, out) = out_option(a, CONSONANT_TABLE)?;
     let vpath = repo_path(VOWEL_TABLE);
     let vtext = std::fs::read_to_string(&vpath).map_err(|e| format!("{vpath}: {e}"))?;
@@ -423,5 +428,274 @@ pub fn consonants(a: &[String]) -> Result<(), String> {
         result.push((name.to_string(), Json::Obj(table)));
     }
     std::fs::write(&out, Json::Obj(result).stringify(1)).map_err(|e| format!("{out}: {e}"))?;
+    Ok(())
+}
+
+/// The smallest area of the tract in a posture (cm²).
+fn tract_min_area(air: &mut HumanAirway, a: &HumanArtic) -> f64 {
+    air.apply(a, 0.0);
+    let mut m = f64::INFINITY;
+    for &x in air.ph_min.iter().chain(air.or_min.iter()) {
+        m = js_min(m, x);
+    }
+    m
+}
+
+/// The smallest area under the oral roof (the fan of rays between the velum and the teeth, cm²):
+/// where the tongue body's front meets the palate, apart from the lips and the pharynx.
+fn oral_min_area(air: &mut HumanAirway, a: &HumanArtic) -> f64 {
+    air.apply(a, 0.0);
+    let f = air.frame.as_ref().expect("a frame after apply");
+    f.grid.iter().filter(|g| g.region == 2).map(|g| g.area).fold(f64::INFINITY, js_min)
+}
+
+/// Where the oral roof's narrowest area is: its distance behind the upper incisors along the
+/// centreline (cm).
+fn oral_min_behind_teeth(air: &mut HumanAirway, a: &HumanArtic) -> f64 {
+    air.apply(a, 0.0);
+    let f = air.frame.as_ref().expect("a frame after apply");
+    let g = f.grid.iter().filter(|g| g.region == 2).min_by(|x, y| x.area.total_cmp(&y.area)).expect("oral rays");
+    f.teeth_s - g.s
+}
+
+/// The value of `key` (searched over ±1.2 around `base`) at which the tract's narrowest area is
+/// `target`: bisection, the area being monotonic in the coordinate over that span.
+fn bisect_area(air: &mut HumanAirway, posture: &HumanArtic, key: ArticKey, base: f64, target: f64) -> (f64, f64) {
+    let mut at = |v: f64| {
+        let mut a = *posture;
+        a.set(key, v);
+        tract_min_area(air, &a)
+    };
+    let (mut lo, mut hi) = (base - 1.2, base + 1.2);
+    let decreasing = at(hi) < at(lo);
+    for _ in 0..40 {
+        let mid = (lo + hi) / 2.0;
+        if (at(mid) > target) == decreasing {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let v = (lo + hi) / 2.0;
+    (v, at(v))
+}
+
+/// `calibrate consonants --contour [--out file]`: the MRI contour anatomy's consonants. Its palate
+/// is lower and its ridge further forward and down than the classic anatomy's, against which the
+/// consonants' tip and body targets were tuned by ear, so the same targets sealed what should only
+/// narrow (/s/ became a stop, /j/ a [tj], the Finnish /r/'s light contacts full closures). All in
+/// each anatomy's own /ɑ/ (jaw 0.55), the classic anatomy's consonant is the reference:
+/// - the alveolars' tongue body (`alveolar.body`): as far below the oral roof;
+/// - tip closures (stops, nasals, laterals, taps, trills): the contact target as far past the seal;
+/// - fricatives and approximants that differ by more than 15 % in their narrowest area: the main
+///   coordinate moved until they agree; the tip fricatives also at the same distance behind the
+///   teeth (the hiss's front cavity), the palatals from the contour /i/'s body and jaw;
+/// - the Finnish /r/'s open and contact tip heights (`r.open`, `r.close`).
+fn consonants_contour(a: &[String]) -> Result<(), String> {
+    use chimera::anatomy::human::BodyMix;
+    use chimera::phonetics::inventory::{ALVEOLAR_BODY, FI_R_CLOSE_Y, FI_R_OPEN_Y, FI_R_X, Manner, phoneme};
+    let (_, out) = out_option(a, CONTOUR_CONSONANT_TABLE)?;
+    let read = |path: &str| -> Result<VowelTable, String> {
+        let p = repo_path(path);
+        let text = std::fs::read_to_string(&p).map_err(|e| format!("{p}: {e}"))?;
+        serde_json::from_str(&text).map_err(|e| format!("{p}: {e}"))
+    };
+    let (classic_v, contour_v) = (read(VOWEL_TABLE)?, read(CONTOUR_VOWEL_TABLE)?);
+    let mut result: Vec<(String, Json)> = Vec::new();
+    for (name, body) in BODIES {
+        let mut ca = HumanAirway::new(96000.0, body);
+        let mut ma = HumanAirway::new(96000.0, body.with_model(TractModel::Contour));
+        let ctx = |t: &VowelTable| {
+            let mut c = t[name]["ɑ"].artic.apply_to(&NEUTRAL);
+            c.set(ArticKey::Jaw, 0.55);
+            c
+        };
+        let (cc, mc) = (ctx(&classic_v), ctx(&contour_v));
+        let classic_body = BodyMix::from(name);
+        let mut table: Vec<(String, Json)> = Vec::new();
+        // The tongue body alveolars bring forward (the planner's alveolar F2 locus): as far from
+        // the oral roof as the classic body is (the narrowest oral ray), with the tip down at rest. At the classic (3.2, 7.4)
+        // the MRI tongue's front stood at the ridge and closed the /s/ beside the tip.
+        let body_at = |c: &HumanArtic, x: f64, y: f64| {
+            let tip = rest_tip(c.jaw, x, y);
+            HumanArtic { tb_x: x, tb_y: y, tt_x: tip.x, tt_y: tip.y, ..*c }
+        };
+        let body_target = oral_min_area(&mut ca, &body_at(&cc, ALVEOLAR_BODY.0, ALVEOLAR_BODY.1));
+        let mut lo = ALVEOLAR_BODY.1 - 1.5;
+        let mut hi = ALVEOLAR_BODY.1;
+        for _ in 0..40 {
+            let mid = 0.5 * (lo + hi);
+            if oral_min_area(&mut ma, &body_at(&mc, ALVEOLAR_BODY.0, mid)) > body_target {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let alv = (ALVEOLAR_BODY.0, 0.5 * (lo + hi));
+        table.push(("alveolar.body".to_string(), Json::Obj(vec![("tbX".to_string(), Json::Num(round3(alv.0))), ("tbY".to_string(), Json::Num(round3(alv.1)))])));
+        println!("{} alveolar body tbY {} -> {} (area {}, classic {})", pad_end(name, 6), fixed(ALVEOLAR_BODY.1, 3), fixed(alv.1, 3), fixed(oral_min_area(&mut ma, &body_at(&mc, alv.0, alv.1)), 3), fixed(body_target, 3));
+        for p in inventory() {
+            // Tip closures (/t d n l ɾ/, the affricates' stops): the classic targets reach 0.3–0.4 cm
+            // past where the tip seals on the classic ridge; on the MRI's lower ridge the same
+            // targets pressed 1.2 cm past it, and the tip, climbing out of that overshoot, let go
+            // late ("nenä": the /n/ 8 ms longer, eating the /æ/). The target moves with the seal.
+            if matches!(p.manner, Manner::Stop | Manner::Nasal | Manner::Affricate | Manner::Tap | Manner::Trill | Manner::Lateral) && p.dominant.contains(&ArticKey::TtY) {
+                let Some(def) = phoneme(p.ipa, classic_body) else { continue };
+                let Some(y) = def.targets.get(ArticKey::TtY) else { continue };
+                let alveolar = p.place == "alveolar" && matches!(p.manner, Manner::Stop | Manner::Nasal | Manner::Affricate | Manner::Tap);
+                let with_body = |c: &HumanArtic, b: (f64, f64)| if alveolar { HumanArtic { tb_x: b.0, tb_y: b.1, ..*c } } else { *c };
+                // (a lateral's midline seal, measured without its side channel)
+                let midline = |a: HumanArtic| HumanArtic { lateral: 0.0, ..a };
+                let (pc, pm) = (midline(with_body(&def.targets.apply_to(&cc), ALVEOLAR_BODY)), midline(with_body(&def.targets.apply_to(&mc), alv)));
+                let (seal_c, got_c) = bisect_area(&mut ca, &pc, ArticKey::TtY, y - 0.4, 0.002);
+                let (seal_m, got_m) = bisect_area(&mut ma, &pm, ArticKey::TtY, y - 0.4, 0.002);
+                if (got_c - 0.002).abs() > 0.001 || (got_m - 0.002).abs() > 0.001 {
+                    println!("{} {} no seal to keep the overshoot of (areas {}, {})", pad_end(name, 6), pad_end(p.ipa, 3), fixed(got_c, 3), fixed(got_m, 3));
+                    continue;
+                }
+                let ym = y + (seal_m - seal_c);
+                if (ym - y).abs() > 0.02 {
+                    table.push((p.ipa.to_string(), Json::Obj(vec![("ttY".to_string(), Json::Num(round3(ym)))])));
+                    println!("{} {} contact ttY {} -> {} (seals at {}, classic {})", pad_end(name, 6), pad_end(p.ipa, 3), fixed(y, 3), fixed(ym, 3), fixed(seal_m, 3), fixed(seal_c, 3));
+                }
+                continue;
+            }
+            // (not the laterals: their side channel keeps them open in either anatomy, 0.28 cm² in
+            // both in running speech)
+            if !matches!(p.manner, Manner::Fricative | Manner::Approximant) {
+                continue;
+            }
+            let key = match p.cal_key {
+                Some(k) => k,
+                None if p.dominant.contains(&ArticKey::TtY) => ArticKey::TtY,
+                None if p.dominant.contains(&ArticKey::TbY) => ArticKey::TbY,
+                None => continue,
+            };
+            // the classic anatomy's consonant, calibrated values included; an alveolar fricative
+            // with the tongue body each anatomy brings forward for it
+            let Some(def) = phoneme(p.ipa, classic_body) else { continue };
+            let alveolar = p.place == "alveolar" && p.manner == Manner::Fricative;
+            let with_body = |c: &HumanArtic, b: (f64, f64)| if alveolar { HumanArtic { tb_x: b.0, tb_y: b.1, ..*c } } else { *c };
+            let target = tract_min_area(&mut ca, &with_body(&def.targets.apply_to(&cc), ALVEOLAR_BODY));
+            if target < 0.005 {
+                continue;
+            }
+            let posture = with_body(&def.targets.apply_to(&mc), alv);
+            let now = tract_min_area(&mut ma, &posture);
+            if (now - target).abs() <= 0.15 * target {
+                continue;
+            }
+            let base = def.targets.get(key).unwrap_or_else(|| posture.get(key));
+            // The palatals (/j ç ʝ/) narrow under the hard palate. The MRI's palate is lower and
+            // its ridge further back than the classic one's; with the classic targets' jaw and
+            // a free tip, the blade met the ridge first and the /j/ became a coronal [tj]
+            // whatever the body's height. They take the contour /i/'s body front–back and jaw
+            // (the MRI vowel the /j/ is a tighter version of) and rise until the opening matches.
+            if p.place == "palatal" && key == ArticKey::TbY {
+                let i = contour_v[name]["i"].artic;
+                let (ix, ij) = (i.get(ArticKey::TbX).unwrap_or(posture.tb_x), i.get(ArticKey::Jaw).unwrap_or(posture.jaw));
+                let at = |y: f64| {
+                    let tip = rest_tip(ij, ix, y);
+                    HumanArtic { tb_x: ix, tb_y: y, jaw: ij, tt_x: tip.x, tt_y: tip.y, ..posture }
+                };
+                let classic_tip = {
+                    let c = def.targets.apply_to(&cc);
+                    let tip = rest_tip(c.jaw, c.tb_x, c.tb_y);
+                    HumanArtic { tt_x: tip.x, tt_y: tip.y, ..c }
+                };
+                let target = oral_min_area(&mut ca, &classic_tip);
+                let (mut lo, mut hi) = (i.get(ArticKey::TbY).unwrap_or(posture.tb_y) - 0.5, base + 0.5);
+                for _ in 0..40 {
+                    let mid = 0.5 * (lo + hi);
+                    if oral_min_area(&mut ma, &at(mid)) > target {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                let y = 0.5 * (lo + hi);
+                let got = oral_min_area(&mut ma, &at(y));
+                let (wc, wm) = (oral_min_behind_teeth(&mut ca, &classic_tip), oral_min_behind_teeth(&mut ma, &at(y)));
+                table.push((p.ipa.to_string(), Json::Obj(vec![("tbX".to_string(), Json::Num(round3(ix))), ("tbY".to_string(), Json::Num(round3(y))), ("jaw".to_string(), Json::Num(round3(ij)))])));
+                println!("{} {} tbY: {} -> {} (tbX {}, jaw {}) area {} -> {} (classic {}), narrowest {} cm behind the teeth (classic {})", pad_end(name, 6), pad_end(p.ipa, 3), fixed(base, 3), fixed(y, 3), fixed(ix, 2), fixed(ij, 2), fixed(now, 3), fixed(got, 3), fixed(target, 3), fixed(wm, 2), fixed(wc, 2));
+                continue;
+            }
+            // A body raised toward the palate (/j ç ʝ/) with the body as far forward as the
+            // classic targets put it (tbX 3.8, beyond the MRI's 3.57) pressed the dorsum's front
+            // onto the ridge at any height: such a body steps back, 2 mm at a time, until the
+            // height alone can give the opening.
+            // A tip fricative's hiss is shaped by the cavity in front of its constriction (the
+            // sibilant's spectral peak). The MRI ridge sits lower and further forward against the
+            // incisors than the classic one: with the classic tip position the /s/ narrowed 1 cm
+            // behind the teeth instead of 2, its peak 1 kHz higher and its 2–4 kHz 12 dB weaker (a
+            // thin, whistly [s]). The tip moves back (and up to the same opening) until the
+            // constriction is as far behind the teeth as the classic one.
+            if key == ArticKey::TtY && p.manner == Manner::Fricative && p.dominant.contains(&ArticKey::TtX) {
+                let x0 = def.targets.get(ArticKey::TtX).unwrap_or(posture.tt_x);
+                let where_c = oral_min_behind_teeth(&mut ca, &with_body(&def.targets.apply_to(&cc), ALVEOLAR_BODY));
+                let mut best: Option<(f64, f64, f64, f64)> = None; // (|Δ where|, ttX, ttY, area)
+                for i in 0..=24 {
+                    let x = x0 + 0.2 - 0.05 * i as f64;
+                    let at_x = HumanArtic { tt_x: x, ..posture };
+                    let (y, got) = bisect_area(&mut ma, &at_x, key, base, target);
+                    if (got - target).abs() > 0.1 * target {
+                        continue;
+                    }
+                    let miss = (oral_min_behind_teeth(&mut ma, &HumanArtic { tt_y: y, ..at_x }) - where_c).abs();
+                    if best.is_none_or(|b| miss < b.0 - 1e-9) {
+                        best = Some((miss, x, y, got));
+                    }
+                }
+                if let Some((miss, x, y, got)) = best {
+                    table.push((p.ipa.to_string(), Json::Obj(vec![("ttX".to_string(), Json::Num(round3(x))), ("ttY".to_string(), Json::Num(round3(y)))])));
+                    println!("{} {} ttX {} -> {}, ttY {} -> {}: area {} -> {} (classic {}), narrowest {} cm behind the teeth (classic {})", pad_end(name, 6), pad_end(p.ipa, 3), fixed(x0, 2), fixed(x, 2), fixed(base, 3), fixed(y, 3), fixed(now, 3), fixed(got, 3), fixed(target, 3), fixed(where_c + miss.copysign(1.0), 2), fixed(where_c, 2));
+                    continue;
+                }
+            }
+            let mut posture = posture;
+            let mut entry = Vec::new();
+            let mut found = None;
+            for step in 0..8 {
+                if key == ArticKey::TbY && step > 0 {
+                    let x = js_min(def.targets.get(ArticKey::TbX).unwrap_or(posture.tb_x), contour::model().guide_range[1][1]) - 0.2 * (step - 1) as f64;
+                    posture.tb_x = x;
+                }
+                let (v, got) = bisect_area(&mut ma, &posture, key, base, target);
+                if (got - target).abs() <= 0.1 * target {
+                    found = Some((v, got));
+                    break;
+                }
+                if key != ArticKey::TbY {
+                    found = Some((v, got));
+                    break;
+                }
+            }
+            let Some((v, got)) = found else {
+                println!("{} {} {}: no posture gives the classic opening {}", pad_end(name, 6), pad_end(p.ipa, 3), key.name(), fixed(target, 3));
+                continue;
+            };
+            if key == ArticKey::TbY && Some(posture.tb_x) != def.targets.get(ArticKey::TbX) {
+                entry.push(("tbX".to_string(), Json::Num(round3(posture.tb_x))));
+            }
+            entry.push((key.name().to_string(), Json::Num(round3(v))));
+            table.push((p.ipa.to_string(), Json::Obj(entry)));
+            println!("{} {} {}: {} -> {} (tbX {}) area {} -> {} (classic {})", pad_end(name, 6), pad_end(p.ipa, 3), key.name(), fixed(base, 3), fixed(v, 3), fixed(posture.tb_x, 2), fixed(now, 3), fixed(got, 3), fixed(target, 3));
+        }
+        // The Finnish /r/: the open phase as open as the classic one, and the contact target as
+        // far past the seal as the classic one (it is a static seal in both; the tip only touches
+        // in the 12 ms it is held, which the overshoot past the seal decides)
+        let tip = |c: &HumanArtic, y: f64| HumanArtic { tt_x: FI_R_X, tt_y: y, ..*c };
+        let target = tract_min_area(&mut ca, &tip(&cc, FI_R_OPEN_Y));
+        let (open, got) = bisect_area(&mut ma, &tip(&mc, FI_R_OPEN_Y), ArticKey::TtY, FI_R_OPEN_Y, target);
+        let (seal_c, _) = bisect_area(&mut ca, &tip(&cc, FI_R_CLOSE_Y), ArticKey::TtY, FI_R_CLOSE_Y, 0.002);
+        let (seal_m, _) = bisect_area(&mut ma, &tip(&mc, FI_R_CLOSE_Y), ArticKey::TtY, FI_R_CLOSE_Y, 0.002);
+        let close = seal_m + (FI_R_CLOSE_Y - seal_c);
+        table.push(("r.open".to_string(), Json::Obj(vec![("ttY".to_string(), Json::Num(round3(open)))])));
+        table.push(("r.close".to_string(), Json::Obj(vec![("ttY".to_string(), Json::Num(round3(close)))])));
+        println!("{} r       open ttY {} -> {} (area {}, classic {}); contact {} -> {} (seals at {}, classic {})", pad_end(name, 6), fixed(FI_R_OPEN_Y, 3), fixed(open, 3), fixed(got, 3), fixed(target, 3), fixed(FI_R_CLOSE_Y, 3), fixed(close, 3), fixed(seal_m, 3), fixed(seal_c, 3));
+        result.push((name.to_string(), Json::Obj(table)));
+    }
+    std::fs::write(&out, Json::Obj(result).stringify(1)).map_err(|e| format!("{out}: {e}"))?;
+    println!("wrote {out}");
     Ok(())
 }
