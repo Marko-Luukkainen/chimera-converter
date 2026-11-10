@@ -6,7 +6,7 @@
 //! Real time: [`phoneme`] returns a `Copy` definition (targets inline, strings static) and
 //! allocates nothing once [`init`] has parsed the tables.
 
-use crate::anatomy::human::{ArticKey, ArticPatch, BodyMix, BodyName};
+use crate::anatomy::human::{ArticKey, ArticPatch, BodyMix, BodyName, TractModel};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -226,12 +226,19 @@ type CalTable = BTreeMap<String, BTreeMap<String, ArticPatch>>;
 
 static BASE: LazyLock<Vec<PhonemeDef>> = LazyLock::new(base);
 static CAL: LazyLock<CalTable> = LazyLock::new(|| serde_json::from_str(include_str!("consonantTargets.generated.json")).expect("consonantTargets.generated.json"));
+/// The MRI contour anatomy's consonants (`chimera calibrate consonants --contour`), matched to
+/// the classic anatomy's, whose consonants were tuned by ear: each fricative and approximant as
+/// open (the tip fricatives and the palatals also at the same place), each tip closure as far past
+/// its seal, the alveolars' tongue body as far from the roof (`alveolar.body`), and the Finnish
+/// /r/'s tip heights (`r.open`, `r.close`). Entries override the classic table's.
+static CONTOUR_CAL: LazyLock<CalTable> = LazyLock::new(|| serde_json::from_str(include_str!("consonantTargets.contour.generated.json")).expect("consonantTargets.contour.generated.json"));
 static SYMBOLS: LazyLock<Vec<&'static str>> = LazyLock::new(|| BASE.iter().map(|p| p.ipa).collect());
 
 /// Parse the tables now (so nothing initialises lazily on the audio thread).
 pub fn init() {
     LazyLock::force(&BASE);
     LazyLock::force(&CAL);
+    LazyLock::force(&CONTOUR_CAL);
     LazyLock::force(&SYMBOLS);
 }
 
@@ -245,7 +252,12 @@ fn by_ipa(ipa: &str) -> Option<&'static PhonemeDef> {
 /// is `Copy`).
 pub fn phoneme(ipa: &str, body: BodyMix) -> Option<PhonemeDef> {
     let p = by_ipa(ipa)?;
-    let of = |b: BodyName| match CAL.get(b.cal_name()).and_then(|t| t.get(ipa)) {
+    let contour = body.model == TractModel::Contour;
+    let cal = |b: BodyName| {
+        let c = if contour { CONTOUR_CAL.get(b.cal_name()).and_then(|t| t.get(ipa)) } else { None };
+        c.or_else(|| CAL.get(b.cal_name()).and_then(|t| t.get(ipa)))
+    };
+    let of = |b: BodyName| match cal(b) {
         Some(cal) => {
             let mut t = p.targets;
             t.merge(cal);
@@ -260,6 +272,45 @@ pub fn phoneme(ipa: &str, body: BodyMix) -> Option<PhonemeDef> {
     };
     Some(out)
 }
+
+/// The Finnish /r/'s tip heights (open phase, contact) for a body: the classic anatomy's
+/// [`FI_R_OPEN_Y`] and [`FI_R_CLOSE_Y`], or the contour anatomy's calibrated equivalents (the same
+/// openings against its own alveolar ridge), blended by the body's weights.
+pub fn fi_r_heights(body: BodyMix) -> (f64, f64) {
+    if body.model != TractModel::Contour {
+        return (FI_R_OPEN_Y, FI_R_CLOSE_Y);
+    }
+    let y = |b: BodyName, key: &str, dflt: f64| CONTOUR_CAL.get(b.cal_name()).and_then(|t| t.get(key)).and_then(|p| p.get(TtY)).unwrap_or(dflt);
+    (body.blend(|b| y(b, "r.open", FI_R_OPEN_Y)), body.blend(|b| y(b, "r.close", FI_R_CLOSE_Y)))
+}
+
+/// Where an alveolar consonant puts the tongue body (the alveolar F2 locus, ~1.8 kHz): the
+/// classic anatomy's [`ALVEOLAR_BODY`], or the contour anatomy's calibrated equivalent
+/// (`alveolar.body`: the body as far from the roof as the classic one is), blended by weight.
+/// The MRI tongue's front stands higher at the classic body position and closed the /s/ beside
+/// the tip.
+pub fn alveolar_body(body: BodyMix) -> (f64, f64) {
+    if body.model != TractModel::Contour {
+        return ALVEOLAR_BODY;
+    }
+    let get = |b: BodyName, k: ArticKey, dflt: f64| CONTOUR_CAL.get(b.cal_name()).and_then(|t| t.get("alveolar.body")).and_then(|p| p.get(k)).unwrap_or(dflt);
+    (body.blend(|b| get(b, TbX, ALVEOLAR_BODY.0)), body.blend(|b| get(b, TbY, ALVEOLAR_BODY.1)))
+}
+
+/// The classic anatomy's tongue body for alveolars (tbX, tbY).
+pub const ALVEOLAR_BODY: (f64, f64) = (3.2, 7.4);
+
+/// The tip during the Finnish /r/'s open phases (classic anatomy): raised toward the ridge, short
+/// of contact.
+pub const FI_R_OPEN_Y: f64 = 9.2;
+/// The tip's contact target in the Finnish /r/ (classic anatomy): a light touch that narrows the
+/// tract to ~0.02–0.03 cm² without sealing it. Sealed contacts (target 10.5) stopped the voicing
+/// within a contact, and it did not restart in the open phase: the trills were voiced for 26–52 %
+/// of their length, against 85–100 % with light contacts, whose amplitude dips (20–30 dB) still
+/// mark each contact.
+pub const FI_R_CLOSE_Y: f64 = 9.4;
+/// The Finnish /r/'s tip position across the ridge.
+pub const FI_R_X: f64 = 6.25;
 
 /// A stop moved to the dental place (the tip against the upper teeth): Finnish /t/ is
 /// laminal-dental, not alveolar like English /t/. Only the tip targets change.

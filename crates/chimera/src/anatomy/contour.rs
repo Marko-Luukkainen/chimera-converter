@@ -12,8 +12,9 @@
 //! (the lower incisors' drop), the tongue-body centre (the centre of the classic tongue's circle
 //! fitted to the dorsum) and the root (its position below the dorsum, beyond what the body's
 //! position predicts). The planner and the gestures keep working unchanged, and the MRI decides
-//! how the real tongue's shape follows them; the vowels have their own calibration for this
-//! anatomy. The tongue tip, blade, lips, teeth, jaw kinematics and larynx stay the classic model's.
+//! how the real tongue's shape follows them; the vowels and the consonants have their own
+//! calibration for this anatomy. The tongue tip, blade, lips, teeth, jaw kinematics and larynx stay
+//! the classic model's.
 //!
 //! `contourModel.generated.json` is written by `chimera anatomy fit` from the contours that
 //! `tools/contour-model/extract.py` takes out of Ruthven, Peplinski & Miquel (2023), "A

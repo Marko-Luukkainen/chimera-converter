@@ -114,7 +114,7 @@ fn oral(body: BodyMix, ipa: &str, a: f64, b: f64, speed: f64, label: &str, extra
     for (k, x) in extra {
         tg.set(*k, *x);
     }
-    oral_gestures_into(&d, &tg, a, b, speed, label, out);
+    oral_gestures_into(&d, &tg, a, b, speed, label, body, out);
     start
 }
 

@@ -197,3 +197,142 @@ fn the_contour_anatomy_does_not_allocate_once_warm() {
     }
     assert_eq!(allocs() - before, 0);
 }
+
+/// One Finnish phrase rendered in one anatomy: the output, the plan's segments, and the tract's
+/// narrowest area per 128-sample block (its time at the block's end).
+fn render_fi(text: &str, body: &str, model: TractModel, f0: f64) -> (Vec<f32>, Vec<chimera::phonetics::PlannedSegment>, Vec<(f64, f64)>) {
+    use chimera::phonetics::finnish::to_phrases;
+    use chimera::phonetics::planner::{PhraseInput, plan_phrases};
+    let mix = BodyMix::from(body).with_model(model);
+    let inputs: Vec<PhraseInput> = to_phrases(text).iter().map(|p| PhraseInput { segments: p.segments.clone(), intonation: Some(p.intonation), pause: Some(p.pause) }).collect();
+    let plan = plan_phrases(&inputs, &PlanOptions { body: mix, t0: 0.05, f0: Some(f0), language: Some(Language::Finnish), ..Default::default() });
+    let fs = 48000.0;
+    let mut v = HumanVoice::new(fs, mix.body(), 2);
+    v.set_source(&SourcePatch::f0(f0));
+    v.schedule(&plan.gestures);
+    let mut out = vec![0f32; (fs * (plan.end + 0.2)) as usize];
+    let mut mins = Vec::new();
+    for (i, ch) in out.chunks_mut(128).enumerate() {
+        v.render(ch);
+        let m = v.airway.ph_areas.iter().chain(&v.airway.or_areas).fold(f64::INFINITY, |a, &b| a.min(b));
+        mins.push((((i + 1) * 128) as f64 / fs, m));
+    }
+    assert!(out.iter().all(|x| x.is_finite()), "{body} {model:?} {text:?}: non-finite output");
+    (out, plan.segments, mins)
+}
+
+/// Energy (dB) of `x` between `lo` and `hi` Hz (a Hann-windowed DFT, 23 Hz bins).
+fn band_db(x: &[f32], lo: f64, hi: f64) -> f64 {
+    let n = x.len();
+    let mut e = 0.0;
+    let mut f = lo;
+    while f < hi {
+        let w = 2.0 * std::f64::consts::PI * f / 48000.0;
+        let (mut re, mut im) = (0.0, 0.0);
+        for (i, &s) in x.iter().enumerate() {
+            let h = 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / n as f64).cos();
+            re += h * s as f64 * (w * i as f64).cos();
+            im += h * s as f64 * (w * i as f64).sin();
+        }
+        e += re * re + im * im;
+        f += 48000.0 / n as f64;
+    }
+    10.0 * (e + 1e-30).log10()
+}
+
+/// The contour anatomy's Finnish consonants behave as the classic anatomy's do. Before its own
+/// consonant calibration the MRI palate and ridge turned the classic targets' narrowings into
+/// contacts ("Kellotjati stoita": /j/ and /s/ sealed), its /j/ narrowed at the ridge instead of
+/// the palate, its /s/ hissed 1 kHz too high, and the velum of an /m/ lay on the tongue of a back
+/// vowel below the nasal branch ("pim pom pom" with a blocked nose).
+#[test]
+fn contour_finnish_consonants_match_the_classic_ones() {
+    let text = "kellojasi soita, herää jo, pim pom pom";
+    for (body, f0) in [("male", 112.0), ("female", 205.0)] {
+        let (co, cs, cm) = render_fi(text, body, TractModel::Classic, f0);
+        let (mo, ms, mm) = render_fi(text, body, TractModel::Contour, f0);
+        assert_eq!(cs.iter().map(|s| s.ipa.as_str()).collect::<Vec<_>>(), ms.iter().map(|s| s.ipa.as_str()).collect::<Vec<_>>());
+        let rms = |out: &[f32], a: f64, b: f64| {
+            let (a, b) = ((a * 48000.0) as usize, (b * 48000.0) as usize);
+            (out[a..b].iter().map(|x| (*x as f64).powi(2)).sum::<f64>() / (b - a).max(1) as f64).sqrt()
+        };
+        let vowel_rms = |out: &[f32], segs: &[chimera::phonetics::PlannedSegment]| {
+            let v: Vec<f64> = segs.iter().filter(|s| s.kind == "vowel").map(|s| rms(out, s.t0 + 0.01, s.t1 - 0.01)).collect();
+            (v.iter().map(|x| x * x).sum::<f64>() / v.len() as f64).sqrt()
+        };
+        let (cv, mv) = (vowel_rms(&co, &cs), vowel_rms(&mo, &ms));
+        // within a segment: the narrowest area, and how long the tract is shut (ms)
+        let within = |mins: &[(f64, f64)], t0: f64, t1: f64| {
+            let fr: Vec<f64> = mins.iter().filter(|(t, _)| *t >= t0 && *t < t1).map(|(_, a)| *a).collect();
+            (fr.iter().cloned().fold(f64::INFINITY, f64::min), fr.iter().filter(|a| **a < 0.01).count() as f64 * 128.0 / 48.0)
+        };
+        for (c, m) in cs.iter().zip(&ms) {
+            let ((c_min, c_shut), (m_min, m_shut)) = (within(&cm, c.t0, c.t1), within(&mm, m.t0, m.t1));
+            let what = format!("{body} /{}/ at {:.2} s", c.ipa, c.t0);
+            match c.ipa.as_str() {
+                "j" | "s" => {
+                    assert!(m_shut == 0.0, "{what}: the MRI tract shuts for {m_shut:.0} ms");
+                    assert!(m_min > 0.6 * c_min && m_min < 1.6 * c_min, "{what}: narrowest {m_min:.3} cm², classic {c_min:.3}");
+                }
+                "r" => assert!(m_shut <= c_shut + 3.0, "{what}: the tap shuts {m_shut:.0} ms, classic {c_shut:.0}"),
+                "m" => {
+                    let db = |out: &[f32], s: &chimera::phonetics::PlannedSegment, v: f64| 20.0 * (rms(out, s.t0, s.t1) / v).log10();
+                    let (dc, dm) = (db(&co, c, cv), db(&mo, m, mv));
+                    assert!(dm > dc - 3.0, "{what}: the murmur {dm:.1} dB re the vowels, classic {dc:.1} (a blocked nose)");
+                }
+                _ => {}
+            }
+            if c.ipa == "s" {
+                // the hiss's balance: 2–4 kHz against 4–11 kHz, mid-fricative
+                let mid = |out: &[f32], s: &chimera::phonetics::PlannedSegment| {
+                    let i = ((s.t0 + s.t1) / 2.0 * 48000.0) as usize - 1024;
+                    let x = &out[i..i + 2048];
+                    band_db(x, 2000.0, 4000.0) - band_db(x, 4000.0, 11000.0)
+                };
+                let (bc, bm) = (mid(&co, c), mid(&mo, m));
+                assert!((bm - bc).abs() < 6.0, "{what}: 2–4 kHz {bm:+.1} dB against 4–11 kHz, classic {bc:+.1}");
+            }
+        }
+    }
+}
+
+/// The palatal approximant narrows under the hard palate in the contour anatomy, as in the
+/// classic one, not at the ridge behind the incisors (where it made a coronal [tj]).
+#[test]
+fn the_contour_j_is_palatal() {
+    use chimera::phonetics::inventory::phoneme;
+    for name in ["male", "female", "child"] {
+        let body = BodyMix::from(format!("{name}/contour").as_str());
+        let j = phoneme("j", body).expect("j").targets;
+        let a = vowel_artic("ɑ", body).expect("ɑ").apply_to(&NEUTRAL);
+        let mut a = j.apply_to(&a);
+        let tip = chimera::anatomy::human::rest_tip(a.jaw, a.tb_x, a.tb_y);
+        a.tt_x = tip.x;
+        a.tt_y = tip.y;
+        let b = body.body();
+        let mut tract = HumanVocalTract::new(b);
+        let f = tract.compute_new(&a);
+        let g = f.grid.iter().filter(|g| g.region == 2).min_by(|x, y| x.area.total_cmp(&y.area)).unwrap();
+        let behind = f.teeth_s - g.s;
+        assert!(behind > 2.5 * b.scale, "{name}: /j/ narrowest {behind:.2} cm behind the teeth");
+        assert!(g.area > 0.05 * b.scale * b.scale && g.area < 0.4 * b.scale * b.scale, "{name}: /j/ opening {:.3} cm²", g.area);
+    }
+}
+
+/// With the velum open, the pharynx below the nasal branch stays open even where the velum lies
+/// on the tongue: the MRI /o/ with the port of an /m/ keeps at least the port's area there.
+#[test]
+fn the_contour_velum_on_the_tongue_leaves_the_nose_open() {
+    for name in ["male", "female"] {
+        let body = BodyMix::from(format!("{name}/contour").as_str());
+        let o = vowel_artic("o", body).expect("o").apply_to(&NEUTRAL);
+        let b = body.body();
+        let mut tract = HumanVocalTract::new(b);
+        let a = HumanArtic { velum: 0.45, lip_ap: -0.2, ..o };
+        let f = tract.compute_new(&a);
+        let split = f.split_index as usize;
+        let port = 0.45 * b.scale * b.scale;
+        let behind = f.grid[..=split].iter().filter(|g| g.region >= 1).map(|g| g.area).fold(f64::INFINITY, f64::min);
+        assert!(behind > 0.9 * port, "{name}: the pharynx below the nasal branch narrows to {behind:.3} cm² (port {port:.2})");
+    }
+}

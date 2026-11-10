@@ -21,7 +21,7 @@ MRI segmentations ─► extract.py ─► contours.json ─► chimera anatomy 
 | Soft palate | 2.8 cm flap, 194°–240° | MRI length and closed/open directions (classic thickness) |
 | Tongue tip and blade, lips, teeth, jaw, larynx, epilarynx | classic | classic |
 | Vowel targets | `vowelTargets*.generated.json` | `vowelTargets*.contour.generated.json` |
-| Consonant targets | calibrated | the classic ones |
+| Consonant targets | `consonantTargets.generated.json` | the classic ones, with the MRI's own places in `consonantTargets.contour.generated.json` |
 
 The model follows Maeda's (1990) guided factor analysis. The tongue surface is measured on 21 fixed
 lines (six horizontals across the lower pharynx, 15 rays from the mid-oral centre), and its distance
@@ -43,6 +43,7 @@ python tools/contour-model/extract.py <unzipped>/data contours.json --plot plots
 cargo run --release -p chimera-cli -- anatomy fit contours.json --frames frames.json
 cargo run --release -p chimera-cli -- calibrate vowels all --contour
 cargo run --release -p chimera-cli -- calibrate vowels all --fi --contour
+cargo run --release -p chimera-cli -- calibrate consonants --contour
 cargo run --release -p chimera-cli -- anatomy frame female/contour i > frame.json
 ```
 
@@ -62,6 +63,22 @@ sheared horizontally until the posterior pharyngeal wall leans as the template's
 fades out towards the velum and the front of the mouth. The MRI field ends 2–5 cm above the glottis
 depending on the speaker, so measurements within 3 mm of its edge are dropped and the means over
 speakers are chained from the lines every speaker reaches.
+
+## Consonants
+
+The consonants' targets were tuned by ear against the classic palate and ridge. The MRI palate is
+about 5 mm lower and its alveolar ridge sits further forward and down, so with the same targets the
+MRI tract sealed where it should only narrow (/s/ and /j/ became stops: "Kellotjati stoita"),
+narrowed /j/ at the ridge instead of the palate, hissed its /s/ 1 kHz too high, and pressed the
+tip 1.2 cm past the seal in /t n l/. `calibrate consonants --contour` matches each consonant to the
+classic anatomy's in the same vowel: the opening of fricatives and approximants (and, for the tip
+fricatives and the palatals, the place: as far behind the teeth), the tip closures' overshoot past
+the seal, the alveolars' tongue body and the Finnish /r/'s tip heights. Nothing changes in the
+classic anatomy.
+
+The MRI tongue of a back vowel also stands close under the soft palate, and a lowered velum (an
+/m/ after /o/) lies on it. The pharynx up to the nasal branch keeps at least the port's area there
+(the air reaches the nose behind the velum), which the classic tongue never needed.
 
 ## Fit (as generated)
 

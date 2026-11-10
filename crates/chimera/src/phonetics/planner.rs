@@ -6,7 +6,7 @@
 //! sequencer) builds into a caller's `Vec` and allocates nothing once it has capacity.
 
 use super::durations::{SegInfo, finnish_durations, klatt_durations};
-use super::inventory::{Glottal, Manner, PhonemeDef, Voicing, dental_stop, phoneme};
+use super::inventory::{FI_R_X, Glottal, Manner, PhonemeDef, Voicing, alveolar_body, dental_stop, fi_r_heights, phoneme};
 use super::{Intonation, Language, Plan, PlannedSegment, Segment};
 use crate::anatomy::human::{ArticKey, ArticPatch, BodyMix, BodyName, TractModel};
 use crate::control::score::{ControlKey, Gesture, Targets};
@@ -349,7 +349,8 @@ pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
             Some(p) if finnish && (p.vowel.is_some() || p.def.is_some_and(|d| d.manner == Manner::Trill)) => js_min(1.0, js_max(FI_RAMP_MIN, (times[i - 1].t1 - times[i - 1].t0) / FI_RAMP_FULL_VOWEL)),
             _ => 1.0,
         };
-        let mut add_oral = |tg: &ArticPatch, a: f64, b: f64, speed: f64, label: &str| oral_gestures_ramped(def, tg, a, b, speed, label, ramp_scale, &mut gestures);
+        let alveolar_tb = alveolar_body(body);
+        let mut add_oral = |tg: &ArticPatch, a: f64, b: f64, speed: f64, label: &str| oral_gestures_ramped(def, tg, a, b, speed, label, ramp_scale, alveolar_tb, &mut gestures);
         match def.manner {
             // a stop that closes behind another stop's closure, its articulator already placed by
             // the segment before that (the tip raised for /ɹ/ in "sharp tree"), reaches contact
@@ -375,7 +376,7 @@ pub fn plan_utterance(input: &[Segment], o: &PlanOptions) -> Plan {
                     Some(_) => FI_R_TAIL,
                     None => 0.0,
                 };
-                finnish_r_gestures(def, t0, t1, tail, &mut gestures)
+                finnish_r_gestures(def, body, t0, t1, tail, &mut gestures)
             }
             Manner::Trill => {
                 // driven trill: rapid alternation of near-closure and release at ~26 Hz
@@ -572,13 +573,6 @@ const FI_RAMP_MIN: f64 = 0.4;
 
 /// One contact period of the Finnish /r/ (s): ~29 Hz, inside the 25–35 Hz of measured trills.
 pub const FI_R_PERIOD: f64 = 0.034;
-/// The tip during the open phases: raised toward the ridge, short of contact.
-const FI_R_OPEN_Y: f64 = 9.2;
-/// The tip's contact target: a light touch that narrows the tract to ~0.02–0.03 cm² without
-/// sealing it. Sealed contacts (target 10.5) stopped the voicing within a contact, and it did
-/// not restart in the open phase: the trills were voiced for 26–52 % of their length, against
-/// 85–100 % with light contacts, whose amplitude dips (20–30 dB) still mark each contact.
-const FI_R_CLOSE_Y: f64 = 9.4;
 /// How long each contact gesture is held (s), and how far ahead of the contact centre it starts.
 const FI_R_CONTACT: f64 = 0.012;
 const FI_R_LEAD: f64 = 0.015;
@@ -600,7 +594,9 @@ const FI_R_RAISE: f64 = 0.025;
 /// The generic trill held its contact gestures with 30 ms ramps, so its contacts merged into
 /// one long closure: /r/ came out as silence with a click, and in "perkele" the /k/ closure
 /// squeezed the air trapped behind the tip into a pop.
-fn finnish_r_gestures(def: &PhonemeDef, t0: f64, t1: f64, tail: f64, out: &mut Vec<Gesture>) {
+/// The tip heights come from [`fi_r_heights`] (the anatomy's own ridge).
+fn finnish_r_gestures(def: &PhonemeDef, body: BodyMix, t0: f64, t1: f64, tail: f64, out: &mut Vec<Gesture>) {
+    let (open_y, close_y) = fi_r_heights(body);
     let dur = t1 - t0;
     // before a consonant the contacts keep clear of its approach (`tail` of open time), so the
     // tip has let go and the voicing resumed before the next constriction forms; a span too
@@ -608,15 +604,15 @@ fn finnish_r_gestures(def: &PhonemeDef, t0: f64, t1: f64, tail: f64, out: &mut V
     let span = if tail > 0.0 { js_max(0.5 * dur, dur - tail) } else { dur };
     let n = js_max(1.0, js_min(js_round(dur / FI_R_PERIOD), js_round(span / (0.7 * FI_R_PERIOD))));
     let period = span / n;
-    let tip = |y: f64| Targets::default().with(ArticKey::TtX, 6.25).with(ArticKey::TtY, y);
+    let tip = |y: f64| Targets::default().with(ArticKey::TtX, FI_R_X).with(ArticKey::TtY, y);
     // the tip rises toward the ridge during the end of the vowel before, as speakers anticipate a
     // trill; from the vowel's resting tip the first contact fell short (0.05 cm², no seal)
     let open_end = if tail > 0.0 { t0 + span } else { t1 };
-    out.push(Gesture::new(t0 - FI_R_RAISE, open_end, FI_R_RAISE, 0.015, 8.0, tip(FI_R_OPEN_Y)).speed(FI_R_SPEED).label(def.ipa));
+    out.push(Gesture::new(t0 - FI_R_RAISE, open_end, FI_R_RAISE, 0.015, 8.0, tip(open_y)).speed(FI_R_SPEED).label(def.ipa));
     let mut k = 0.0;
     while k < n {
         let c = t0 + (k + 0.5) * period;
-        out.push(Gesture::new(c - FI_R_LEAD, c - FI_R_LEAD + FI_R_CONTACT, 0.004, 0.004, 40.0, tip(FI_R_CLOSE_Y)).speed(FI_R_SPEED).label(def.ipa));
+        out.push(Gesture::new(c - FI_R_LEAD, c - FI_R_LEAD + FI_R_CONTACT, 0.004, 0.004, 40.0, tip(close_y)).speed(FI_R_SPEED).label(def.ipa));
         k += 1.0;
     }
 }
@@ -671,16 +667,17 @@ fn pitch_ramp(dur: f64) -> f64 {
 /// Oral gestures for one consonant constriction held acoustically from `a` to `b` (closure to
 /// release): a dominant gesture on the consonant's own articulators and a weak one on the rest.
 /// Movement latencies are compensated so the acoustic closure and release land on a and b.
-pub fn oral_gestures(def: &PhonemeDef, tg: &ArticPatch, a: f64, b: f64, speed: f64, label: &str) -> Vec<Gesture> {
+pub fn oral_gestures(def: &PhonemeDef, tg: &ArticPatch, a: f64, b: f64, speed: f64, label: &str, body: BodyMix) -> Vec<Gesture> {
     let mut out = Vec::with_capacity(4);
-    oral_gestures_into(def, tg, a, b, speed, label, &mut out);
+    oral_gestures_into(def, tg, a, b, speed, label, body, &mut out);
     out
 }
 
 /// [`oral_gestures`], appended to `out` (at most four gestures; no allocation when `out` has
 /// room for them).
-pub fn oral_gestures_into(def: &PhonemeDef, tg: &ArticPatch, a: f64, b: f64, speed: f64, label: &str, out: &mut Vec<Gesture>) {
-    oral_gestures_ramped(def, tg, a, b, speed, label, 1.0, out)
+#[allow(clippy::too_many_arguments)]
+pub fn oral_gestures_into(def: &PhonemeDef, tg: &ArticPatch, a: f64, b: f64, speed: f64, label: &str, body: BodyMix, out: &mut Vec<Gesture>) {
+    oral_gestures_ramped(def, tg, a, b, speed, label, 1.0, alveolar_body(body), out)
 }
 
 /// [`oral_gestures_into`] with the dominant gesture's ramp-in scaled by `ramp_scale` (1 for the
@@ -688,7 +685,7 @@ pub fn oral_gestures_into(def: &PhonemeDef, tg: &ArticPatch, a: f64, b: f64, spe
 /// usual 30 ms approach plus latency lead: in "kukka" the /kk/ closure began forming 40 ms
 /// before its planned start, and the /u/ was voiced for under a third of its length.
 #[allow(clippy::too_many_arguments)]
-fn oral_gestures_ramped(def: &PhonemeDef, tg: &ArticPatch, a: f64, b: f64, speed: f64, label: &str, ramp_scale: f64, out: &mut Vec<Gesture>) {
+fn oral_gestures_ramped(def: &PhonemeDef, tg: &ArticPatch, a: f64, b: f64, speed: f64, label: &str, ramp_scale: f64, alveolar_tb: (f64, f64), out: &mut Vec<Gesture>) {
     let mut dom = ArticPatch::default();
     let mut sec = ArticPatch::default();
     for (k, v) in tg.iter() {
@@ -720,7 +717,7 @@ fn oral_gestures_ramped(def: &PhonemeDef, tg: &ArticPatch, a: f64, b: f64, speed
     // alveolars front the tongue body during the closure (the alveolar F2 locus, ~1.8 kHz)
     let alveolar = def.place == "alveolar" && tg.get(ArticKey::TbX).is_none() && matches!(def.manner, Manner::Stop | Manner::Nasal | Manner::Fricative | Manner::Affricate | Manner::Tap);
     if alveolar {
-        out.push(Gesture::new(a, b, 0.05, 0.05, 1.2, Targets::default().with(ArticKey::TbX, 3.2).with(ArticKey::TbY, 7.4)).label(label));
+        out.push(Gesture::new(a, b, 0.05, 0.05, 1.2, Targets::default().with(ArticKey::TbX, alveolar_tb.0).with(ArticKey::TbY, alveolar_tb.1)).label(label));
     }
     if !sec.is_empty() {
         // a velar's front–back place follows the vowel (fronted /k/ in "key", backed in "caw"):

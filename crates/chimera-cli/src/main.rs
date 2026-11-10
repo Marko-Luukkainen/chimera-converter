@@ -31,7 +31,7 @@ usage: chimera <command> [args] [--float]
   compare csd    [csd-dir] [outdir] [--songs a|b|all|en001a,…] [--body female] [--jobs n]
                  [--against earlier/score.json]  (score.json: distance to the singer, and the verdict)
   calibrate vowels     [male|female|child|all] [--fi] [--contour] [--out file]
-  calibrate consonants [--out file]
+  calibrate consonants [--contour] [--out file]
   anatomy fit    <contours.json> [--out file] [--frames file]
                  (the MRI contour anatomy from tools/contour-model/extract.py's contours)
 

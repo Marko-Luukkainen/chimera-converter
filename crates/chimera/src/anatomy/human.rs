@@ -1406,6 +1406,22 @@ impl HumanVocalTract {
                 grid[i].area = lim;
             }
         }
+        // contour anatomy: the way to the nose. The MRI tongue of a back vowel stands close under
+        // the soft palate (/o/: 0.5 cm² there with the port shut), and the lowered velum of an /m/
+        // or /n/ then lies on it. The rays up to the split (where the nasal branch joins) that end
+        // on the velum or on the port window below its tip measure the gap in front of the
+        // velum, which that contact closes, while the air reaches the nose behind the velum,
+        // through the port: the pharynx closed below the nasal branch ("pom": the /m/ 5–12 dB
+        // weaker than in the classic anatomy, a blocked nose). Those rays keep at least the
+        // port's area, fading in over the 3 mm of wall below the window; the oral tube beyond the
+        // split stays closed by the contact. (The classic tongue never reaches the velum.)
+        if self.contour.is_some() && a.velum > 0.0 && split_index >= 0 {
+            let port = a.velum * k * k;
+            for g in grid.iter_mut().take(split_index as usize + 1).filter(|g| g.region >= 1) {
+                let w = smoothstep(uv_y - 0.3 * k, uv_y, g.outer.y);
+                g.area = js_max(g.area, w * port);
+            }
+        }
         // lateral channel (for /l/): keeps a side passage open around a midline tip closure
         if a.lateral > 0.0 {
             for g in grid.iter_mut() {
