@@ -131,6 +131,13 @@ class Analysis:
     em: tuple | None = None
     """the alignment model's output (log-probabilities, frame length, vocab, blank), once computed"""
     duration: float = 0.0
+    warnings: list[str] = field(default_factory=list)
+    """what the separation found worth telling (audio.lead_losses)"""
+    env: np.ndarray | None = None
+    """the vowel band's energy every 5 ms (rap.vowel_envelope), for rap's sharper syllable onsets"""
+
+
+STYLES = ("sing", "rap")
 
 
 def retranscribe(an: Analysis, singing: "transcribe.Detection | None" = None) -> Analysis:
@@ -152,6 +159,8 @@ def save_analysis(path: Path, an: Analysis) -> None:
         lp, frame, vocab, blank = an.em
         extra = {"lp": lp.astype(np.float16), "frame": frame, "vocab": json.dumps(vocab), "blank": blank}
     tmp = path.with_name(path.stem + ".tmp.npz")
+    if an.env is not None:
+        extra["env"] = an.env.astype(np.float16)
     np.savez_compressed(tmp, hz=an.hz, per=an.per, rms=an.rms, pitch_method=an.pitch_method, voice_only=an.voice_only,
                         duration=an.duration, **extra)
     tmp.replace(path)
@@ -163,16 +172,20 @@ def load_analysis(path: Path, singing: "transcribe.Detection | None" = None) -> 
     if "lp" in d:
         em = (d["lp"].astype(np.float32), float(d["frame"]), json.loads(str(d["vocab"])), int(d["blank"]))
     an = Analysis(None, np.zeros(0), np.zeros(0), str(d["pitch_method"]), hz=d["hz"], per=d["per"], rms=d["rms"],
-                  voice_only=bool(d["voice_only"]), em=em, duration=float(d["duration"]))
+                  voice_only=bool(d["voice_only"]), em=em, duration=float(d["duration"]),
+                  env=d["env"].astype(np.float32) if "env" in d else None)
     return retranscribe(an, singing)
 
 
 def analyze_audio(path: Path, separate: bool, device: str, pitch_method: str | None = None,
                   vocals_out: Path | None = None, progress: Progress = _quiet,
-                  singing: "transcribe.Detection | None" = None, voice_only: bool | None = None) -> Analysis:
+                  singing: "transcribe.Detection | None" = None, voice_only: bool | None = None,
+                  separator: str = "htdemucs", lead_only: bool = False) -> Analysis:
+    warnings: list[str] = []
     if separate:
         progress("separating the voice", 0.0)
-        voc, sr = audio.separate_vocals(path, device, save_to=vocals_out, log=lambda *_: None)
+        voc, sr = audio.separate_vocals(path, device, save_to=vocals_out, log=lambda *_: None, method=separator,
+                                        lead_only=lead_only, warn=warnings.append)
         import librosa
 
         y16 = librosa.resample(voc, orig_sr=sr, target_sr=16000)
@@ -188,8 +201,11 @@ def analyze_audio(path: Path, separate: bool, device: str, pitch_method: str | N
             pitch_method = "pyin"
     progress("pitch", 0.0)
     hz, per, rms = audio.raw_pitch(y16, pitch_method, device)
+    from .rap import vowel_envelope
+
     an = Analysis(y16, np.zeros(0), np.zeros(0), pitch_method, vocals_out if separate else None, hz=hz, per=per, rms=rms,
-                  voice_only=separate if voice_only is None else voice_only, duration=len(y16) / 16000)
+                  voice_only=separate if voice_only is None else voice_only, duration=len(y16) / 16000,
+                  warnings=warnings, env=vowel_envelope(y16))
     return retranscribe(an, singing)
 
 
@@ -229,8 +245,34 @@ class Placement:
 
 
 def place_notes(lyr: Lyrics, an: Analysis, align_mode: str, device: str, o: notes.Opts,
-                align_model: str | None = None, progress: Progress = _quiet, log=print) -> Placement:
+                align_model: str | None = None, progress: Progress = _quiet, log=print, style: str = "sing",
+                rap_opts: "rap.Opts | None" = None) -> Placement:
+    """rap_opts: the rap style's settings (defaults, with `o.rest` as the rest, when None)."""
     doubtful: list[int] = []
+    if style not in STYLES:
+        raise ValueError(f"style must be one of {', '.join(STYLES)}")
+    if style == "rap":
+        if align_mode != "mms":
+            raise ValueError("the rap style needs the lyrics alignment (align: mms): it places the words first")
+        from . import align, rap
+
+        progress("aligning the lyrics", 0.0)
+        if an.em is None:
+            if an.y16 is None:
+                raise ValueError("the alignment model's output is missing; analyse the recording again")
+            an.em = align.emissions(an.y16, align_model or align.DEFAULT_MODEL, device)
+        if an.env is None and an.y16 is not None:
+            an.env = rap.vowel_envelope(an.y16)
+        if an.env is None:
+            log("rap: no vowel band envelope in this analysis (made by an older version): onsets are the model's")
+        det = an.singing or transcribe.Detection()
+        r = rap.place(lyr.words, an.em, an.tr.frames, an.tr.tuning, an.env, det.gate_db, an.voice_only,
+                      rap_opts or rap.Opts(rest=o.rest))
+        log(f"rap: {len(r.notes)} syllables, {r.moved} onsets sharpened on the vowels, "
+            f"{r.unpitched} with no clear pitch of their own (pitch from their neighbours)")
+        if not r.notes:
+            raise ValueError("no notes found (is there a voice in the recording?)")
+        return Placement(r.notes, r.doubtful)
     if align_mode == "mms":
         from . import align, assign
 
@@ -302,6 +344,10 @@ def build_melody(ns: list[notes.Note], lyr: Lyrics, rest: float = 0.25, transpos
     ev, t0 = chimera.events(ns, rest, transpose, keep_cents)
     sounding = sum(1 for e in ev if e[0] > 0)
     warnings = []
+    silent = [w.text for w in lyr.words if not w.syls]
+    if silent:
+        warnings.append(f"no syllable in {', '.join(dict.fromkeys(silent))}: left out of the song; "
+                        "write them as they are said (MC -> äm-sii)")
     expected = len(lyr.syl_word) + sum(melismas.values())
     if sounding != expected:
         warnings.append(f"{sounding} notes for {expected} syllables")

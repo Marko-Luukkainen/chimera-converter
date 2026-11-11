@@ -93,6 +93,7 @@ export function App() {
       <main className="main">
         {current === null ? (
           <NewSong
+            info={info}
             onCreated={(id) => {
               refresh();
               setCurrent(id);

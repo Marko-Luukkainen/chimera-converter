@@ -3,6 +3,7 @@ import { api, LANG_NAMES, type Info, type Lang, type RenderJob, type Session } f
 import { innerMelismas, mergePrev, noteName, setPitch, shiftSyllable, split, valid, type Note } from "./edit.ts";
 import { Roll } from "./Roll.tsx";
 import { SingingCheck } from "./Singing.tsx";
+import { StyleChip } from "./Style.tsx";
 
 type Source = "original" | "vocals" | "chimera";
 const BODIES: [string, string][] = [["female", "Female"], ["male", "Male"], ["child", "Child"]];
@@ -70,6 +71,7 @@ export function Editor(props: { id: string; info: Info | null; onChanged: () => 
       <header className="song-head">
         <h2>{s.title}</h2>
         <LangChip s={s} onChange={relang} />
+        <StyleChip key={`${s.id}-${s.options.style ?? "sing"}`} s={s} info={props.info} onQueued={follow} />
       </header>
       {(s.status === "queued" || s.status === "running") && <Progress s={s} />}
       {s.status === "error" && (
@@ -94,7 +96,9 @@ export function Editor(props: { id: string; info: Info | null; onChanged: () => 
         </div>
       )}
       {s.status === "review" && <SingingCheck key={s.id} s={s} onQueued={() => follow({ status: "queued", stage: "Queued", progress: 0 })} />}
-      {s.status === "done" && s.notes && <EditorBody key={`${s.id}-${s.lang}-${s.created}`} s={s} info={props.info} onReview={toReview} />}
+      {s.status === "done" && s.notes && (
+        <EditorBody key={`${s.id}-${s.lang}-${s.created}-${s.options.style ?? "sing"}-${JSON.stringify(s.options.rap ?? {})}`} s={s} info={props.info} onReview={toReview} />
+      )}
     </div>
   );
 }

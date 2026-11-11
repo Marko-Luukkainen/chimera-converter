@@ -239,3 +239,73 @@ def test_the_thresholds_are_checked_before_the_notes(client, tmp_path):
     # a new language uses the kept analysis too
     assert client.post(f"/api/sessions/{sid}/lang", json={"lang": "fi"}).status_code == 200
     assert wait_done(client, sid)["status"] == "done"
+
+
+def test_rap_style_is_kept_and_needs_the_alignment(client, tmp_path):
+    wav = tmp_path / "rap.wav"
+    sf.write(wav, voice(), SR)
+    with open(wav, "rb") as f:
+        r = client.post("/api/sessions", files={"audio": ("rap.wav", f, "audio/wav")},
+                        data={"lyrics": "pieni tähti", "lang": "fi", "align": "none", "style": "rap"})
+    assert r.status_code == 400 and "alignment" in r.json()["detail"]
+    with open(wav, "rb") as f:
+        r = client.post("/api/sessions", files={"audio": ("rap.wav", f, "audio/wav")},
+                        data={"lyrics": "pieni tähti", "lang": "fi", "align": "none", "style": "polka"})
+    assert r.status_code == 400
+
+
+def fake_emissions(audio16, model_id, device):
+    """A stand-in for the MMS aligner: every letter equally likely in every 20 ms frame (the CTC
+    path is then spread evenly over the song), so the server's rap path runs without the model."""
+    letters = "abcdefghijklmnopqrstuvwxyz"
+    vocab = {"<blank>": 0, **{c: i + 1 for i, c in enumerate(letters)}}
+    T = int(len(audio16) / 16000 / 0.02)
+    lp = np.full((T, len(vocab)), np.log(1.0 / len(vocab)), np.float32)
+    return lp, 0.02, vocab, 0
+
+
+def test_rap_settings_are_kept_and_the_style_can_change_without_a_new_analysis(client, tmp_path, monkeypatch):
+    monkeypatch.setattr("chimera_convert.align.emissions", fake_emissions)
+    calls = []
+    import chimera_convert.pipeline as pl
+
+    real = pl.analyze_audio
+    monkeypatch.setattr(pl, "analyze_audio", lambda *a, **k: calls.append(1) or real(*a, **k))
+    info = client.get("/api/info").json()
+    assert info["separators"]["htdemucs"] and set(info["rap_defaults"]) == {"rest", "window", "min_rise", "nucleus", "keep_cents"}
+    wav = tmp_path / "rap.wav"
+    sf.write(wav, voice(), SR)
+    with open(wav, "rb") as f:
+        r = client.post("/api/sessions", files={"audio": ("rap.wav", f, "audio/wav")},
+                        data={"lyrics": "Pieni tähti,\ntuikkii yö", "lang": "fi", "align": "mms", "style": "rap", "review": "false",
+                              "rap": json.dumps({"rest": 3, "window": 0.05, "keep_cents": False})})
+    assert r.status_code == 200, r.text
+    sid = r.json()["id"]
+    s = wait_done(client, sid)
+    assert s["status"] == "done", s.get("error")
+    assert s["options"]["rap"] == {"rest": 1.0, "window": 0.05, "min_rise": 4.0, "nucleus": 0.7, "keep_cents": False}
+    assert len(s["notes"]) == len(s["syllables"]) == 7 and all(n["syl"] is not None for n in s["notes"])  # no melismas
+    assert s["vibrato"] == 0.0 and all(m == round(m) for m, _ in s["melody"]["notes"])  # keep_cents off
+    assert len(calls) == 1
+    # singing, then rap again with other settings: the cached analysis, no new one
+    assert client.post(f"/api/sessions/{sid}/style", json={"style": "sing"}).status_code == 200
+    s = wait_done(client, sid)
+    assert s["status"] == "done" and s["options"]["style"] == "sing" and s["vibrato"] == 35.0, s.get("error")
+    r = client.post(f"/api/sessions/{sid}/style", json={"style": "rap", "rap": {"rest": 0.2, "keep_cents": True}})
+    assert r.status_code == 200
+    s = wait_done(client, sid)
+    assert s["status"] == "done" and s["options"]["rap"]["rest"] == 0.2 and s["options"]["rap"]["keep_cents"], s.get("error")
+    assert len(calls) == 1
+    # an edit keeps the style's cents
+    ns = s["notes"]
+    ns[0]["midi"] = 50.37
+    m = client.put(f"/api/sessions/{sid}/notes", json={"notes": ns, "vibrato": 0}).json()["melody"]
+    assert m["notes"][0][0] == 50.37
+    assert client.post(f"/api/sessions/{sid}/style", json={"style": "polka"}).status_code == 400
+
+
+def test_rap_needs_a_song_converted_with_the_alignment(client, tmp_path):
+    sid = upload(client, tmp_path, "Pieni tähti,\ntuikkii yö").json()["id"]  # align: none
+    assert wait_done(client, sid)["status"] == "done"
+    r = client.post(f"/api/sessions/{sid}/style", json={"style": "rap"})
+    assert r.status_code == 409 and "alignment" in r.json()["detail"]

@@ -32,6 +32,40 @@ lyrics ─► words ─► syllables (Finnish: rules, English: Chimera's own spl
 
 The output uses 60 bpm, so one beat is one second and the note lengths are the recording's timing.
 
+### Rap (`--style rap`)
+
+Rap has few steady notes: the pitch glides like speech, one voiced run holds five to ten
+syllables, and shouted lines have no clear pitch. Notes found first don't line up with the
+syllables (in the tests, at 11 syllables a second the singing path puts syllables hundreds of
+milliseconds off). The rap style turns the order around (`rap.py`):
+
+1. **Words first**: the alignment places each syllable's vowel. Vowels are kept where the voice
+   is: on a voice track its loudness, since the pitch tracker misses fast and rough syllables.
+2. **Sharper onsets**: each onset moves onto a rise of the vowel band's energy (150-1200 Hz,
+   5 ms frames) within 80 ms, matched for the whole song at once so two drifting onsets don't
+   take the same vowel; a vowel is placed where its level comes within 12 dB of its peak. On
+   synthetic flows of 6-11 syllables a second with the model 20-40 ms off, the worst error
+   drops to about 3 ms. After a voiced consonant (l, m, n, r, j, v) or another vowel there is
+   often no rise to find: those onsets keep the model's time (about a third on a real song).
+3. **Pitch per syllable**: the median of the clear pitch over the syllable's vowel (its first
+   70 %), kept to the cent. A whispered or shouted syllable takes its neighbours' pitch.
+4. **One note per syllable** up to the next; a silence of 0.15 s or more is a rest. No melismas,
+   no vibrato (0).
+
+It needs the alignment (`--align mms`). A pitch glide inside a syllable is flattened to its
+median: rhythm and timing are exact, intonation is one value per syllable.
+
+What a real song showed (a 3:10 Finnish rap, 590 syllables, Quadro T2000):
+
+- **Keep the ad-libs that are on the recording in the lyrics.** Without them the alignment
+  spent chorus syllables on the ad-libs and one separator put a whole chorus line 5-8 s off.
+  With them the three separators agreed on 94-97 % of the syllables to 50 ms.
+- **Any separator works**; they agree outside the choruses. htdemucs took about 60 s for the
+  whole conversion, htdemucs_ft 120 s, RoFormer 11 min (its separation alone 8.5 min).
+- **`--lead-only` can remove a hook.** The karaoke model kept 98-99 % of the verses but 20-30 %
+  of the choruses, sung there by other voices, and the chorus lyrics piled onto what was left.
+  The converter now says where that happens; leave those lines out of the lyrics or don't use it.
+
 **Language** is read from the lyrics (Finnish or English). When the words don't tell (too few,
 both languages, or they look like another language such as Swedish), the converter asks: the app
 shows a language choice, and the command line stops and asks for `--lang fi` or `--lang en`. You
@@ -44,7 +78,12 @@ browser. Close the window to stop it.
 
 1. **New song**: drop a recording and type the lyrics. The language is detected as you type
    (Language: Detect); if it is unsure, choose Finnish or English before converting. Choose
-   "Separate the voice" for a finished song with its backing.
+   "Separate the voice" for a finished song with its backing (and the separator: Demucs, Demucs
+   fine-tuned or RoFormer; the lead voice alone). Style: Singing or Rap; Rap shows its settings:
+   the shortest silence that is a rest, how far onsets move onto vowels, what rise starts a vowel,
+   which part of a syllable gives its pitch, and pitch to the cent. In the editor, Style "Change…"
+   switches between singing and rap or changes the rap settings: the notes are made again from
+   the analysis already made, in seconds (edits are lost).
 2. **Conversion** shows its progress (the first run downloads the models). First the audio is
    analysed (separation, pitch, the alignment model), then it stops at **What counts as singing**:
    the level and the pitch clarity over the whole song, with a green strip for what counts as
@@ -130,6 +169,18 @@ cargo build --release -p chimera-cli
 The first run downloads the models: the MMS aligner, about 1.2 GB (Hugging Face), and Demucs,
 about 80 MB. They are cached.
 
+Optional, for cleaner vocals (`--separator roformer`) and the lead voice apart from backing vocals
+and ad-libs (`--lead-only`), the audio-separator package, with the same CUDA index as torch:
+
+```powershell
+pip install -r requirements-separator.txt --extra-index-url https://download.pytorch.org/whl/cu128
+```
+
+Without the index pip takes audio-separator's torchvision from PyPI, and with it a CPU torch in
+place of the CUDA one. The file pins torchvision for torch 2.11; for another torch, change it
+(torchvision 0.N+15 goes with torch 2.N). The Mel-Band RoFormer models download on first use and
+are cached in `%USERPROFILE%\.cache\chimera-convert\separator-models`.
+
 ## Command line
 
 Keep conversions in `out\`: it is outside git, so files made from recordings stay out of the repo.
@@ -143,6 +194,9 @@ python -m chimera_convert song.mp3 lyrics.txt --separate --plot -o out\song.json
 
 # English, language chosen; Chimera is found from the repo this sits in, $CHIMERA_REPO or --chimera PATH
 python -m chimera_convert song.mp3 lyrics.txt --lang en --separate -o out\song.json
+
+# rap: words first, one note per syllable
+python -m chimera_convert track.mp3 lyrics.txt --style rap --separate --plot -o out\track.json
 ```
 
 Then in Chimera (at the repo root):
@@ -165,20 +219,28 @@ Then in Chimera (at the repo root):
 | Option | Default | Meaning |
 |---|---|---|
 | `--lang auto\|fi\|en` | `auto` | the lyrics' language; `auto` reads it from the words and stops to ask when unsure |
+| `--style sing\|rap` | `sing` | `rap`: words first, one note per syllable at the pitch inside it (see Rap) |
 | `--separate` | off | separate the voice from the backing first |
+| `--separator htdemucs\|htdemucs_ft\|roformer` | `htdemucs` | with `--separate`: `htdemucs_ft` is cleaner and about 4x slower; `roformer` the cleanest (requirements-separator.txt) |
+| `--lead-only` | off | with `--separate`: the lead voice alone, without backing vocals, doubles and ad-libs (requirements-separator.txt); warns where it drops a hook sung by other voices |
 | `--voice-only` | off | the recording is a voice alone (implied by `--separate`) |
 | `--gate DB`, `--clarity X`, `--rough X`, `--hold S` | suggested | what counts as singing (see the app's step 2) |
 | `--align mms\|none` | `mms` | `none`: no alignment, syllables on notes in order (light, but fragile) |
 | `--pitch crepe\|pyin` | crepe | pitch tracker |
 | `--transpose N` | 0 | semitones, e.g. `-12` for a female part sung by a male voice |
-| `--keep-cents` | off | keep the sung pitch to the cent instead of the nearest note |
-| `--vibrato C` | 35 | vibrato depth written to the file, in cents |
+| `--keep-cents`, `--no-keep-cents` | off (rap: on) | keep the sung pitch to the cent instead of the nearest note |
+| `--vibrato C` | 35 (rap: 0) | vibrato depth written to the file, in cents |
+| `--rest S` | 0.25 (rap: 0.15) | the shortest silence written as a rest |
+| `--rap-window MS`, `--rap-rise DB`, `--rap-nucleus F` | 80, 4, 0.7 | rap: how far an onset moves onto its vowel, the rise (dB per 20 ms) that starts a vowel, the part of a syllable that gives its pitch |
 
 ## The lyrics file
 
 - UTF-8 text. Line breaks, commas and full stops mark breaths.
 - Write the words **exactly as they are sung**: choruses written out, no "×2", no spoken shouts
-  that aren't in the recording.
+  that aren't in the recording, and the ad-libs that are (rap lyrics sites put them in
+  parentheses: keep the words, the parentheses don't matter).
+- Loan words and abbreviations are split by Finnish spelling in a Finnish song: write them as
+  they are said (`äm-sii` for MC, `boi` for boy), or a vowelless word like "MC" gets no syllable.
 - Finnish compounds are split right only when the boundary is marked: `kesä-yö`,
   `rakkaus-laulu`. A hyphen also forces any other split.
 - Melismas need no marking; the converter reads them from the melody.
@@ -198,6 +260,9 @@ Then in Chimera (at the repo root):
 - English syllable counts are certain only when Chimera is found and its
   `target\release\chimera.exe` is built; without it unknown words are guessed. The converter
   checks the count against Chimera at the end and warns when it doesn't match.
+- Rap: the editor draws notes on the nearest semitone row, and dragging a note's pitch rounds it
+  (the file keeps the cents until then). The separator is chosen when a song is added (it is part
+  of the analysis); changing it means adding the song again.
 - Files made from copyrighted recordings must not be added to Chimera's git repo (the repo's
   rule). Keep them in `out\` or outside the repo.
 
@@ -210,7 +275,8 @@ python -m pytest -q
 The tests cover language detection, Finnish syllabification, reading Chimera's syllable split,
 CTC alignment, note finding on synthetic singing (pitches, vibrato, legato, rests, melismas, a
 pitch anticipated in a consonant, a singer drifting flat, rough singing), placing syllables on
-notes, a whole run, and the app's server (conversion, the singing check, editing, rendering, show
+notes, the rap style on synthetic fast flows (onsets on the vowels, pitch per syllable, a breath,
+a whispered syllable), a whole run, and the app's server (conversion, the singing check, editing, rendering, show
 export, language change). The UI's editing rules are tested in `app`: `bun run test`.
 
 `scripts\smoke.bat` runs a round trip with the real models: Chimera sings its demo songs, the

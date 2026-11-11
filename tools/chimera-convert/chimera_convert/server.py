@@ -95,6 +95,31 @@ class Store:
         return out
 
 
+def rap_settings(opt: dict):
+    """The rap style's settings of a session (its defaults where the session has none)."""
+    from .rap import Opts
+
+    return Opts.from_dict(opt.get("rap"))
+
+
+def keep_cents(opt: dict) -> bool:
+    """Notes to the cent: the rap style's default, a choice of its own (`rap.keep_cents`)."""
+    if opt.get("style", "sing") != "rap":
+        return False
+    return bool((opt.get("rap") or {}).get("keep_cents", True))
+
+
+def rest_of(opt: dict) -> float:
+    return rap_settings(opt).rest if opt.get("style", "sing") == "rap" else 0.25
+
+
+def clean_rap(r) -> dict:
+    """RapIn -> the session's rap settings, each in its range."""
+    from .rap import Opts
+
+    return {**Opts.from_dict(r.model_dump()).to_dict(), "keep_cents": bool(r.keep_cents)}
+
+
 def summary(s: dict) -> dict:
     return {k: s.get(k) for k in ("id", "title", "created", "status", "stage", "progress", "error", "lang", "duration")}
 
@@ -164,7 +189,8 @@ class Worker:
         vocals = d / "vocals.wav"
         if s.get("phase", "analyze") == "analyze" or not cache.exists():
             if opt["separate"] and not vocals.exists():
-                an = pipeline.analyze_audio(d / s["files"]["original"], True, self.device, None, vocals, progress)
+                an = pipeline.analyze_audio(d / s["files"]["original"], True, self.device, None, vocals, progress,
+                                            separator=opt.get("separator", "htdemucs"), lead_only=bool(opt.get("lead_only")))
             else:
                 src = vocals if vocals.exists() else d / s["files"]["original"]
                 an = pipeline.analyze_audio(src, False, self.device, None, None, progress, voice_only=vocals.exists())
@@ -177,6 +203,8 @@ class Worker:
             sug = an.singing.to_dict()
             s = self.store.load(sid)
             s.update(singing=sug, singing_suggested=sug, phase="notes", duration=round(an.duration, 3), pitch_method=an.pitch_method)
+            if an.warnings:
+                s["analysis_warnings"] = an.warnings
             if vocals.exists():
                 s["files"]["vocals"] = "vocals.wav"
             self.store.save(s)
@@ -193,10 +221,16 @@ class Worker:
         progress("notes", 0.0)
         text = (d / "lyrics.txt").read_text(encoding="utf-8")
         lyr = pipeline.prepare_lyrics(text, s["lang"], self.cli, self.repo)
-        o = notes.Opts()
-        pl = pipeline.place_notes(lyr, an, s["options"].get("align", "mms"), self.device, o, None, progress, log=lambda *_: None)
+        opt = s["options"]
+        rap = opt.get("style", "sing") == "rap"
+        ro = rap_settings(opt)
+        o = notes.Opts(rest=ro.rest if rap else 0.25)
+        pl = pipeline.place_notes(lyr, an, opt.get("align", "mms"), self.device, o, None, progress, log=lambda *_: None,
+                                  style=opt.get("style", "sing"), rap_opts=ro if rap else None)
         ns = pl.notes
-        mel = pipeline.build_melody(ns, lyr, source=s["files"]["original"], cli=self.cli)
+        vibrato = 0.0 if rap else 35.0
+        mel = pipeline.build_melody(ns, lyr, rest=o.rest, keep_cents=keep_cents(opt), vibrato=vibrato,
+                                    source=s["files"]["original"], cli=self.cli)
         midi = [None if not np.isfinite(v) else round(float(v), 2) for v in an.midi]
         s = self.store.load(sid)
         s.update(status="done", stage="Done", progress=1.0, lyrics=lyr.to_dict(), phase="notes",
@@ -204,8 +238,8 @@ class Worker:
                  contour={"hop": float(an.t[1] - an.t[0]) if len(an.t) > 1 else 0.01, "midi": midi},
                  duration=round(an.duration, 3), pitch_method=an.pitch_method,
                  notes=[asdict(n) for n in ns], auto_notes=[asdict(n) for n in ns],
-                 body=mel.data["body"], transpose=0.0, vibrato=35.0,
-                 melody=mel.data, warnings=mel.warnings, render=None, doubtful=pl.doubtful,
+                 body=mel.data["body"], transpose=0.0, vibrato=vibrato,
+                 melody=mel.data, warnings=s.get("analysis_warnings", []) + mel.warnings, render=None, doubtful=pl.doubtful,
                  singing=an.singing.to_dict() if an.singing else s.get("singing"),
                  tuning_cents=round(float(np.median(an.tr.tuning)) * 100) if an.tr else 0)
         self.store.save(s)
@@ -329,6 +363,19 @@ class SingingIn(BaseModel):
     hold: float = 0.4
 
 
+class RapIn(BaseModel):
+    rest: float | None = None
+    window: float | None = None
+    min_rise: float | None = None
+    nucleus: float | None = None
+    keep_cents: bool = True
+
+
+class StyleIn(BaseModel):
+    style: str
+    rap: RapIn | None = None
+
+
 class ReviewIn(BaseModel):
     back: bool = False
 
@@ -368,8 +415,13 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
         except Exception:  # noqa: BLE001
             pass
         cli = chimera.find_cli(repo)
+        import importlib.util
+
+        roformer = importlib.util.find_spec("audio_separator") is not None
         return {"repo": str(repo) if repo else None, "chimera_cli": bool(cli), "gpu": gpu,
-                "shows": str(repo / "public" / "shows") if repo else None, "chimera_url": CHIMERA_DEV_URL}
+                "shows": str(repo / "public" / "shows") if repo else None, "chimera_url": CHIMERA_DEV_URL,
+                "separators": {"htdemucs": True, "htdemucs_ft": True, "roformer": roformer},
+                "rap_defaults": {**rap_settings({}).to_dict(), "keep_cents": True}}
 
     @app.post("/api/detect")
     def detect_lang(body: DetectIn):
@@ -385,9 +437,22 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
     @app.post("/api/sessions")
     async def sessions_new(audio: UploadFile = File(...), lyrics: str = Form(...), lang: str = Form("auto"),
                            separate: bool = Form(False), title: str = Form(""), align: str = Form("mms"),
-                           review: bool = Form(True)):
+                           review: bool = Form(True), style: str = Form("sing"), separator: str = Form("htdemucs"),
+                           lead_only: bool = Form(False), rap: str = Form("")):
         if lang not in ("auto", "fi", "en"):
             raise HTTPException(400, "lang must be auto, fi or en")
+        if style not in pipeline.STYLES:
+            raise HTTPException(400, "style must be sing or rap")
+        if style == "rap" and align != "mms":
+            raise HTTPException(400, "the rap style needs the automatic lyrics alignment")
+        from .audio import SEPARATORS
+
+        if separator not in SEPARATORS:
+            raise HTTPException(400, f"separator must be one of {', '.join(SEPARATORS)}")
+        try:
+            rap_in = RapIn(**json.loads(rap)) if rap.strip() else RapIn()
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, f"rap settings: {e}")
         try:
             lang_used, det = pipeline.resolve_lang(lyrics, lang)
         except ValueError as e:
@@ -404,7 +469,10 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
         s = {"id": sid, "title": title or Path(audio.filename or "song").stem, "created": time.time(),
              "status": "queued", "stage": "Queued", "progress": 0.0, "error": None,
              "lang": lang_used, "lang_requested": lang, "detection": det,
-             "options": {"separate": separate, "align": align, "review": review}, "files": {"original": f"original{ext}"},
+             "options": {"separate": separate, "align": align, "review": review, "style": style,
+                         "separator": separator if separate else None, "lead_only": bool(lead_only and separate),
+                         "rap": clean_rap(rap_in)},
+             "files": {"original": f"original{ext}"},
              "phase": "analyze",
              "lyrics_text": lyrics}
         store.save(s)
@@ -425,6 +493,24 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
         if body.lang not in ("fi", "en"):
             raise HTTPException(400, "lang must be fi or en")
         s = store.update(sid, lang=body.lang, status="queued", stage="Queued", progress=0.0, render=None, phase="notes")
+        worker.submit(sid)
+        return summary(s)
+
+    @app.post("/api/sessions/{sid}/style")
+    def session_style(sid: str, body: StyleIn):
+        """Sing it as rap or as singing, or with other rap settings: the notes are placed again from
+        the cached analysis (no separation, pitch or alignment model runs again); edits are lost."""
+        if body.style not in pipeline.STYLES:
+            raise HTTPException(400, "style must be sing or rap")
+        s = store.load(sid)
+        if s.get("status") in ("queued", "running"):
+            raise HTTPException(409, "already converting")
+        if body.style == "rap" and s["options"].get("align", "mms") != "mms":
+            raise HTTPException(409, "this song was converted without the lyrics alignment, which the rap style needs: add it again with Automatic alignment")
+        opt = dict(s["options"], style=body.style)
+        if body.rap is not None:
+            opt["rap"] = clean_rap(body.rap)
+        s = store.update(sid, options=opt, status="queued", stage="Queued", progress=0.0, render=None, phase="notes")
         worker.submit(sid)
         return summary(s)
 
@@ -493,15 +579,15 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
             ns.sort(key=lambda n: n.start)
             if lyr.lang != "fi":
                 ns = chimera.merge_inner_melismas(ns, lyr.syl_word, lyr.words, log=lambda *_: None)
-            mel = pipeline.build_melody(ns, lyr, transpose=body.transpose, vibrato=body.vibrato,
-                                        source=s["files"]["original"], body=body.body or s.get("body"), cli=worker.cli if worker else None)
+            mel = pipeline.build_melody(ns, lyr, rest=rest_of(s["options"]), transpose=body.transpose, vibrato=body.vibrato,
+                                        keep_cents=keep_cents(s["options"]), source=s["files"]["original"], body=body.body or s.get("body"), cli=worker.cli if worker else None)
         except (ValueError, KeyError, TypeError) as e:
             raise HTTPException(400, str(e))
-        s.update(notes=[asdict(n) for n in ns], melody=mel.data, warnings=mel.warnings, body=mel.data["body"],
+        s.update(notes=[asdict(n) for n in ns], melody=mel.data, warnings=s.get("analysis_warnings", []) + mel.warnings, body=mel.data["body"],
                  transpose=body.transpose, vibrato=body.vibrato)
         store.save(s)
         write_melody(store.dir(sid), mel.data, ns, lyr.syl_text)
-        return {"notes": s["notes"], "melody": mel.data, "warnings": mel.warnings}
+        return {"notes": s["notes"], "melody": mel.data, "warnings": s["warnings"]}
 
     @app.post("/api/sessions/{sid}/render")
     def session_render(sid: str, body: RenderIn):
