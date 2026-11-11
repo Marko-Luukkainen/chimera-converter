@@ -196,7 +196,12 @@ def test_presence_on_a_voice_track_is_loudness_not_pitch():
 
 def test_roformer_and_lead_voice_plumbing(tmp_path, monkeypatch):
     """audio-separator stand-in: each model writes its two stems; the vocal one is read back, and
-    --lead-only runs the karaoke model on the vocal stem."""
+    --lead-only runs the karaoke model on the vocal stem.
+
+    Like the real one (0.48), it checks for ffmpeg when it starts and stops with WinError 2 when
+    there is none: that stopped RoFormer on a second Windows machine. The converter needs no
+    ffmpeg: it hands over a WAV and has soundfile write."""
+    import logging
     import sys
     import types
 
@@ -205,13 +210,20 @@ def test_roformer_and_lead_voice_plumbing(tmp_path, monkeypatch):
     calls = []
 
     class Separator:
-        def __init__(self, model_file_dir, output_dir, output_format):
+        def __init__(self, model_file_dir, output_dir, output_format, use_soundfile=False):
             self.out = output_dir
+            self.logger = logging.getLogger("stand-in")
+            assert use_soundfile, "pydub would need ffmpeg to write"
+            self.check_ffmpeg_installed()
+
+        def check_ffmpeg_installed(self):
+            raise FileNotFoundError(2, "The system cannot find the file specified")
 
         def load_model(self, model_filename):
             self.model = model_filename
 
         def separate(self, path):
+            assert path.endswith(".wav"), "without ffmpeg only a WAV can be read"
             y, sr = sf.read(path)
             calls.append((self.model, sr))
             gain = 0.5 if "karaoke" in self.model else 1.0
@@ -235,6 +247,11 @@ def test_roformer_and_lead_voice_plumbing(tmp_path, monkeypatch):
     assert np.max(np.abs(y)) == pytest.approx(0.2, abs=0.01)  # through the "karaoke" model
     with pytest.raises(ValueError):
         audio.separate_vocals(src, "cpu", method="spleeter")
+    # an mp3 goes in as a WAV made here
+    mp3 = tmp_path / "song.mp3"
+    sf.write(mp3, 0.4 * np.sin(2 * np.pi * 220 * t), 44100, format="MP3")
+    y, sr = audio.separate_vocals(mp3, "cpu", log=lambda *_: None, method="roformer")
+    assert sr == 44100 and np.max(np.abs(y)) == pytest.approx(0.4, abs=0.02)
 
 
 def test_a_missing_separator_module_is_named():
