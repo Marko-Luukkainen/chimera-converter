@@ -22,6 +22,15 @@ describe("duet words", () => {
     expect(w.shown.slice(8, 11)).toEqual(["he-", "rää", "jo"]);
   });
 
+  test("a speech file's syllables are shown over their own times", () => {
+    // the converter's speech style: no notes, each syllable's vowel onset and end
+    const speech = { kind: "spoken", lang: "fi", lyrics: "Hy-vää huo-men-ta", bpm: 0, notes: [], syllables: [[0.4, 0.58], [0.6, 0.8], [0.85, 0.85], [1.05, 1.2], [1.25, 1.6]] as [number, number][] };
+    const w = sungWords(speech, finnishLyricsToSyllables(speech.lyrics));
+    expect(w.shown).toEqual(["Hy-", "vää", "huo-", "men-", "ta"]);
+    expect(w.times[0]).toEqual([0.4, 0.58]);
+    expect(w.times[2][1]).toBeCloseTo(0.9); // a syllable shown at least 50 ms
+  });
+
   test("the English rules garble Finnish words (what the duet used to show, when anything)", () => {
     // they read only ASCII letters: "herää" loses its ää, and "Jaakko" is one held syllable; a song
     // whose count then missed its notes showed no words at all

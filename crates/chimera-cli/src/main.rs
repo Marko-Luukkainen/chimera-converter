@@ -24,7 +24,7 @@ usage: chimera <command> [args] [--float]
   render notes   <in.json> <out> [male|female|child|neanderthal] [--artic tracks.json] [--tele voice.tele]
                  (melody file; midi <= 0 is a rest; \"lang\": \"fi\" for Finnish lyrics;
                   --artic also writes the articulators at 100 Hz)
-  render spoken  <in.json> <out> [male|female|child|neanderthal]
+  render spoken  <in.json> <out> [male|female|child|neanderthal] [--tele voice.tele]
                  (speech at a recording's times: the converter's speech file, with \"lyrics\",
                   \"syllables\": [[vowel, end] s ...], \"f0\": {t0, hop, hz}, \"level\": {t0, hop, v})
   render beatbox [outdir] [preset name | pattern] [male|female|child|neanderthal] [bpm] [bars]

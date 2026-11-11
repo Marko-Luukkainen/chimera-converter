@@ -1,6 +1,7 @@
 /**
  * The words at a duet head's mouth: each sung note's syllable over the note's time, from the voice's
- * melody file (the one `chimera render notes` sang), as Sing mode's demo shows them.
+ * melody file (the one `chimera render notes` sang), as Sing mode's demo shows them; or each
+ * syllable over its time in a speech file (`chimera render spoken`).
  */
 import type { Syllable } from "../wasm/types.ts";
 import type { MouthWord } from "../ui/mouthWords.ts";
@@ -15,6 +16,10 @@ export interface Melody {
   lyrics: string;
   notes: [number, number][];
   lang?: string;
+  /** "spoken": a speech file (`chimera render spoken`): `syllables` instead of notes */
+  kind?: string;
+  /** a speech file's syllables: each one's vowel onset and end (s, on the render's clock) */
+  syllables?: [number, number][];
 }
 
 export interface SungWords {
@@ -32,12 +37,17 @@ export interface SungWords {
  * Throws when the syllables don't match the sounding notes, as the CLI does.
  */
 export function sungWords(m: Melody, syls: Syllable[], spell: Record<string, string> = {}): SungWords {
-  const beat = 60 / m.bpm;
   const times: [number, number][] = [];
-  let t = m.t0 ?? 0.3; // the CLI's default
-  for (const [midi, beats] of m.notes) {
-    if (midi > 0) times.push([t, t + beats * beat]);
-    t += beats * beat;
+  if (m.kind === "spoken") {
+    // speech: each syllable from its vowel to its end, as `render spoken` said it
+    for (const [a, b] of m.syllables ?? []) times.push([a, Math.max(b, a + 0.05)]);
+  } else {
+    const beat = 60 / m.bpm;
+    let t = m.t0 ?? 0.3; // the CLI's default
+    for (const [midi, beats] of m.notes) {
+      if (midi > 0) times.push([t, t + beats * beat]);
+      t += beats * beat;
+    }
   }
   if (syls.length !== times.length) throw new Error(`${syls.length} syllables for ${times.length} notes`);
   const respell = new Map(Object.entries(spell).map(([k, v]) => [k.toLowerCase(), v]));
