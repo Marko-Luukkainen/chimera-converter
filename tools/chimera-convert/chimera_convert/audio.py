@@ -29,7 +29,7 @@ def separate_vocals(path: str | Path, device: str, save_to: Path | None = None, 
 
     method: "htdemucs" (Demucs, the default), "htdemucs_ft" (Demucs fine-tuned: cleaner vocals,
     about four times slower) or "roformer" (Mel-Band RoFormer, the cleanest; needs
-    `pip install -r requirements-separator.txt`). lead_only: then the lead voice alone, without
+    scripts\\install_separator.bat). lead_only: then the lead voice alone, without
     backing vocals, doubles and ad-libs (a RoFormer karaoke model; needs the same package).
     `warn(message)` hears where the lead voice dropped most of the singing (`lead_losses`)."""
     if method not in SEPARATORS:
@@ -132,8 +132,8 @@ def missing_separator(e: ImportError) -> str:
     needs but doesn't declare (audioread: librosa 1.0 no longer brings it)."""
     name = (getattr(e, "name", None) or "").split(".")[0]
     if name in ("", "audio_separator"):
-        return "the RoFormer separator needs audio-separator: pip install -r requirements-separator.txt"
-    return (f"audio-separator is installed but needs the module '{name}': pip install -r requirements-separator.txt "
+        return "the RoFormer separator needs audio-separator: run scripts\\install_separator.bat"
+    return (f"audio-separator is installed but needs the module '{name}': run scripts\\install_separator.bat "
             f"(or pip install {name})")
 
 

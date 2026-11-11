@@ -169,17 +169,14 @@ cargo build --release -p chimera-cli
 The first run downloads the models: the MMS aligner, about 1.2 GB (Hugging Face), and Demucs,
 about 80 MB. They are cached.
 
-Optional, for cleaner vocals (`--separator roformer`) and the lead voice apart from backing vocals
-and ad-libs (`--lead-only`), the audio-separator package, with the same CUDA index as torch:
-
-```powershell
-pip install -r requirements-separator.txt --extra-index-url https://download.pytorch.org/whl/cu128
-```
-
-Without the index pip takes audio-separator's torchvision from PyPI, and with it a CPU torch in
-place of the CUDA one. The file pins torchvision for torch 2.11; for another torch, change it
-(torchvision 0.N+15 goes with torch 2.N). The Mel-Band RoFormer models download on first use and
-are cached in `%USERPROFILE%\.cache\chimera-convert\separator-models`.
+The install also adds the RoFormer separator (`--separator roformer`, cleaner vocals) and the lead
+voice apart from backing vocals and ad-libs (`--lead-only`): `scripts\install_separator.bat`, which
+`install.bat` runs, and which can be run on its own. audio-separator needs torchvision, and from
+PyPI pip would take a torch with it that replaces the CUDA torch with a CPU one; the script installs
+the torchvision built for the torch that is here (torch 2.N goes with torchvision 0.N+15) from
+PyTorch's own index, asks pip first what it would do, and installs nothing if torch, torchaudio,
+numpy or demucs would change (Demucs still works then). The Mel-Band RoFormer models download on
+first use and are cached in `%USERPROFILE%\.cache\chimera-convert\separator-models`.
 
 ## Command line
 
@@ -221,8 +218,8 @@ Then in Chimera (at the repo root):
 | `--lang auto\|fi\|en` | `auto` | the lyrics' language; `auto` reads it from the words and stops to ask when unsure |
 | `--style sing\|rap` | `sing` | `rap`: words first, one note per syllable at the pitch inside it (see Rap) |
 | `--separate` | off | separate the voice from the backing first |
-| `--separator htdemucs\|htdemucs_ft\|roformer` | `htdemucs` | with `--separate`: `htdemucs_ft` is cleaner and about 4x slower; `roformer` the cleanest (requirements-separator.txt) |
-| `--lead-only` | off | with `--separate`: the lead voice alone, without backing vocals, doubles and ad-libs (requirements-separator.txt); warns where it drops a hook sung by other voices |
+| `--separator htdemucs\|htdemucs_ft\|roformer` | `htdemucs` | with `--separate`: `htdemucs_ft` is cleaner and about 4x slower; `roformer` the cleanest (scripts\install_separator.bat) |
+| `--lead-only` | off | with `--separate`: the lead voice alone, without backing vocals, doubles and ad-libs (scripts\install_separator.bat); warns where it drops a hook sung by other voices |
 | `--voice-only` | off | the recording is a voice alone (implied by `--separate`) |
 | `--gate DB`, `--clarity X`, `--rough X`, `--hold S` | suggested | what counts as singing (see the app's step 2) |
 | `--align mms\|none` | `mms` | `none`: no alignment, syllables on notes in order (light, but fragile) |
