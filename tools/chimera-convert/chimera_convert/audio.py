@@ -137,19 +137,48 @@ def missing_separator(e: ImportError) -> str:
             f"(or pip install {name})")
 
 
+def _separator_class(Separator):
+    """audio-separator's Separator without its ffmpeg requirement. It checks for ffmpeg on the PATH
+    when it starts and stops with "[WinError 2] The system cannot find the file specified" when
+    there is none (a new Windows machine), though it needs ffmpeg only to write through pydub and
+    to read formats soundfile can't. Here it writes with soundfile and reads a WAV made here, so
+    the check is only logged."""
+
+    class NoFfmpegSeparator(Separator):
+        def check_ffmpeg_installed(self):
+            try:
+                super().check_ffmpeg_installed()
+            except (FileNotFoundError, OSError):
+                self.logger.info("ffmpeg not found: not needed (WAV in, soundfile out)")
+
+    return NoFfmpegSeparator
+
+
 def _roformer(path: str | Path, model: str, log) -> tuple[np.ndarray, int]:
     """One audio-separator model on a file: its vocal stem (2, n) at 44.1 kHz."""
     import tempfile
+
+    import soundfile as sf
 
     try:
         from audio_separator.separator import Separator
     except ImportError as e:
         raise RuntimeError(missing_separator(e)) from e
     with tempfile.TemporaryDirectory() as tmp:
+        # the input as a WAV, read here (mp3, m4a ... as for Demucs), so audio-separator needs no ffmpeg
+        src = Path(tmp) / "input.wav"
+        if Path(path).suffix.lower() == ".wav":
+            src = Path(path)
+        else:
+            x = load(path, 44100, mono=False)
+            sf.write(str(src), (np.stack([x, x]) if x.ndim == 1 else x).T, 44100)
+        out = Path(tmp) / "out"
+        out.mkdir()
         log(f"separating the voice (RoFormer {model}) ...")
-        sep = Separator(model_file_dir=str(_models_dir()), output_dir=tmp, output_format="WAV")
+        sep = _separator_class(Separator)(model_file_dir=str(_models_dir()), output_dir=str(out), output_format="WAV",
+                                          use_soundfile=True)
         sep.load_model(model_filename=model)
-        files = [str(Path(tmp) / Path(f).name) for f in sep.separate(str(path))]
+        files = [str(out / Path(f).name) for f in sep.separate(str(src))]
         wav = load(pick_vocals(files), 44100, mono=False)
     if wav.ndim == 1:
         wav = np.stack([wav, wav])
