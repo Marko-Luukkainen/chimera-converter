@@ -126,3 +126,20 @@ fn the_rendered_pitch_follows_the_glide() {
     let median = errs[errs.len() / 2];
     assert!(median < 0.5, "median pitch error {median:.2} semitones ({errs:.2?})");
 }
+
+#[test]
+fn a_silence_inside_a_word_is_a_held_consonant_not_a_breath() {
+    // a slow sermon: "Kaik- ... -ki" with the "kk" closure silent for half a second
+    let syl = lyrics_to_syllables("Kaik-ki ha-lu-si-vat");
+    let at = [0.40, 1.10, 1.40, 1.60, 1.80, 2.00];
+    let end = [0.62, 1.30, 1.58, 1.78, 1.98, 2.30];
+    let syls: Vec<SpokenSyllable> = syl.into_iter().zip(at.iter().zip(end)).map(|(syl, (&at, end))| SpokenSyllable { syl, at, end }).collect();
+    let plan = plan_spoken(&syls, &options());
+    let breaths = plan.gestures.iter().filter(|g| g.label_str() == "breath").count();
+    assert_eq!(breaths, 1, "a breath inside \"kaikki\"");
+    // the diphthong stops near where the voice did; the k holds the silence
+    let ai_end = plan.segments.iter().filter(|s| s.kind == "vowel" && s.t0 < 0.9).map(|s| s.t1).fold(0.0, f64::max);
+    assert!(ai_end < 0.75, "\"ai\" held to {ai_end:.2} s over the closure");
+    let k = plan.segments.iter().find(|s| s.kind != "vowel" && s.t0 >= ai_end - 1e-6).unwrap();
+    assert!(k.t1 - k.t0 > 0.25, "the closure {:.2} s", k.t1 - k.t0);
+}

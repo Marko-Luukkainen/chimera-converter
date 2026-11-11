@@ -97,6 +97,8 @@ pub struct SpokenOptions {
 const MIN_CONSONANT: f64 = 0.015;
 /// a vowel keeps at least this long (s)
 const MIN_VOWEL: f64 = 0.03;
+/// the longest a consonant is held over a silence inside a breath group (s)
+const HELD_CONSONANT: f64 = 0.35;
 /// contour points every this long at most (s)
 const STEP: f64 = 0.04;
 /// the pitch's gestures win over the planner's and the performer's
@@ -153,11 +155,12 @@ pub fn plan_spoken(syls: &[SpokenSyllable], o: &SpokenOptions) -> Plan {
     let base_f0 = o.f0.at(syls.first().map_or(0.0, |s| s.at)).unwrap_or(110.0);
     let mut i = 0;
     while i < syls.len() {
-        // the breath group: up to a pause
+        // the breath group: up to a pause after a word (inside a word, a silence is a consonant
+        // held: the closure of "kk" in a slow "kaik-ki", not a breath)
         let mut j = i;
         while j < syls.len() - 1 {
             let next_onset = total(&spoken(&syls[j + 1].syl.onset, o.body));
-            if syls[j + 1].at - next_onset - syls[j].end > pause {
+            if syls[j].syl.word_end && syls[j + 1].at - next_onset - syls[j].end > pause {
                 break;
             }
             j += 1;
@@ -176,7 +179,20 @@ pub fn plan_spoken(syls: &[SpokenSyllable], o: &SpokenOptions) -> Plan {
             let (span, next) = if k < j { (syls[k + 1].at - syls[k].at, &mut onsets[k + 1 - i][..]) } else { (syls[k].end - syls[k].at, &mut [][..]) };
             // a vowel keeps a third of a short syllable, consonants the rest
             let vowel = js_max(MIN_VOWEL, js_min(0.08, span / 3.0));
-            fit([&mut codas[k - i][..], next], span, vowel);
+            fit([&mut codas[k - i][..], &mut *next], span, vowel);
+            // a silence in the recording before the next syllable (within the breath group): the
+            // vowel stops where the voice did and the consonants between hold the rest, up to
+            // HELD_CONSONANT (a geminate's closure); without consonants the vowel holds it
+            if k < j {
+                let cons = total(&codas[k - i]) + total(&*next);
+                let gap = span - cons - js_max(MIN_VOWEL, syls[k].end - syls[k].at);
+                if gap > 0.0 {
+                    let held = if let Some(c) = codas[k - i].last_mut() { Some(c) } else { next.first_mut() };
+                    if let Some(c) = held {
+                        c.dur = Some(c.dur.unwrap_or(0.0) + js_min(gap, HELD_CONSONANT));
+                    }
+                }
+            }
         }
         let mut segs: Vec<Segment> = Vec::new();
         for k in i..=j {
