@@ -7,6 +7,8 @@ matplotlib
 torchcrepe>=0.0.22
 demucs==4.0.1
 transformers>=4.40
+# model downloads trust the OS's certificates (antivirus HTTPS scanning, company proxies)
+truststore>=0.9
 pytest
 # the app's server
 fastapi>=0.110
