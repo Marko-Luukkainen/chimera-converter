@@ -634,12 +634,24 @@ pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
 /// Speech at a recording's times (the converter's speech style): the syllables of `lyrics` with
 /// their vowels at `syllables[k][0]` and their ends at `syllables[k][1]`, the pitch from `f0`
 /// (Hz every `hop` s from `t0`, 0 where there is none) and the loudness from `level` (0..1).
-/// `render spoken <in.json> <out> [male|female|child|neanderthal]`
+/// `render spoken <in.json> <out> [male|female|child|neanderthal] [--tele voice.tele]`
+/// (`--tele`: the voice's telemetry over time, as `render notes` writes it, for the duet page)
 ///
 /// The plan is scheduled as the render reaches it (a second ahead), so a long recording's contour
 /// gestures don't fill the score.
 pub fn spoken(ctx: &Ctx, a: &[String]) -> Result<(), String> {
-    let input = a.first().ok_or("render spoken <in.json> <out> [male|female|child|neanderthal]")?;
+    let mut tele_out: Option<String> = None;
+    let mut rest = Vec::new();
+    let mut it = a.iter();
+    while let Some(x) = it.next() {
+        if x == "--tele" {
+            tele_out = Some(it.next().ok_or("--tele needs a file")?.clone());
+        } else {
+            rest.push(x.clone());
+        }
+    }
+    let a = &rest[..];
+    let input = a.first().ok_or("render spoken <in.json> <out> [male|female|child|neanderthal] [--tele voice.tele]")?;
     let out_name = wav_name(arg(a, 1, "out/spoken"));
     let body_name = arg(a, 2, "male");
     let b = body(body_name)?;
@@ -686,6 +698,8 @@ pub fn spoken(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let mut out = vec![0f32; n];
     let (mut next, mut done) = (0usize, 0usize);
     let chunk = (FS * 0.25) as usize / 128 * 128;
+    // telemetry every TELE_HOP samples of the whole render (chunks are a multiple of it)
+    let mut rec = if tele_out.is_some() { Some(TeleRecorder::new(&mut v)) } else { None };
     while done < n {
         let t = done as f64 / FS;
         let mut batch = Vec::new();
@@ -695,11 +709,28 @@ pub fn spoken(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         }
         v.schedule(&batch);
         let b = (done + chunk).min(n);
-        render_blocks(&mut v, &mut out[done..b]);
+        match rec.as_mut() {
+            Some(r) => {
+                let mut pos = done;
+                while pos < b {
+                    let end = b.min((pos / TELE_HOP + 1) * TELE_HOP);
+                    render_blocks(&mut v, &mut out[pos..end]);
+                    pos = end;
+                    if pos % TELE_HOP == 0 {
+                        r.snap(&mut v)?;
+                    }
+                }
+            }
+            None => render_blocks(&mut v, &mut out[done..b]),
+        }
         done = b;
     }
     ctx.write_wav(&out_name, &out)?;
     println!("{out_name}: {} s, peak {}, {} syllables", fixed(n as f64 / FS, 2), fixed(peak(&out), 3), syls.len());
+    if let (Some(path), Some(r)) = (&tele_out, rec) {
+        std::fs::write(path, r.bytes(body_mix(body_name)?)).map_err(|e| format!("{path}: {e}"))?;
+        println!("{path}: {} telemetry frames every {TELE_HOP} samples", r.frames);
+    }
     Ok(())
 }
 

@@ -11,7 +11,8 @@
  *     "voices": [{ "name": "Lower", "tele": "male.tele" }, { "name": "Upper", "tele": "female.tele" }] }
  *
  * Optional: `bpm` and `downbeat` (s, a bar's first beat) nod the heads on the beat; a voice's
- * `melody` (the melody file it was rendered from) writes its words at its mouth, split into
+ * `melody` (the melody file it was rendered from, or the speech file of `chimera render spoken`)
+ * writes its words at its mouth, split into
  * syllables by its `"lang"` (Finnish rules for "fi", the English dictionary otherwise, as the CLI
  * sang them), and the show's `spell` ({"owr": "our"}) writes a syllable spelled for the dictionary
  * as it should read.
@@ -133,7 +134,8 @@ export function DuetPage(props: { id: string }) {
       });
       const voices = show.voices.map((v, i) => ({ name: v.name, track: new TeleTrack(teles[i]), words: words[i] }));
       await transport.load(audio);
-      const melody = show.voices.length === 1 && words[0] ? melodies[0] : null;
+      // live singing needs a melody: a speech file is replayed only
+      const melody = show.voices.length === 1 && words[0] && melodies[0]?.kind !== "spoken" ? melodies[0] : null;
       const backing = melody && show.backing ? await fetchOk(base + show.backing).then((r) => r.arrayBuffer()).catch(() => null) : null;
       if (live) setLoaded({ show, voices, melody, backing });
     })().catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));

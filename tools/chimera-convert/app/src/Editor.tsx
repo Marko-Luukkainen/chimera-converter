@@ -195,7 +195,7 @@ function EditorBody({ s, info, onReview }: { s: Session; info: Info | null; onRe
   const nSyl = s.syllables!.length;
   /** the speech style: said by Chimera's speech planner (no vibrato, no live or duet pages) */
   const spoken = s.melody?.kind === "spoken";
-  const melodyOnly = "Chimera's live and duet pages sing melodies: speech is heard here (Speak with Chimera) and in the downloaded file";
+  const melodyOnly = "Chimera's Sing mode sings melodies: speech is heard here (Speak with Chimera), in a duet show and in the downloaded file";
   const sylsPerWord = useMemo(() => s.lyrics!.words.map((w) => w.syls.length), [s]);
   // only English folds a melisma inside a word (Finnish words are written in parts around it)
   const flagged = useMemo(() => (s.lang === "en" ? innerMelismas(notes, s.syl_word!, sylsPerWord) : new Set<number>()), [notes, s, sylsPerWord]);
@@ -534,7 +534,7 @@ function EditorBody({ s, info, onReview }: { s: Session; info: Info | null; onRe
           >
             Open in Chimera (live)
           </button>
-          <button onClick={() => setShowOpen((v) => !v)} disabled={spoken} title={spoken ? melodyOnly : ""}>
+          <button onClick={() => setShowOpen((v) => !v)}>
             Duet show…
           </button>
         </div>
@@ -675,7 +675,7 @@ function ShowPanel({ s, info, stale, onDone }: { s: Session; info: Info | null; 
       <button className="primary" onClick={go} disabled={busy || stale || !info?.repo}>
         {busy ? "Sending …" : "Send"}
       </button>
-      {stale && <span className="warn">Sing the current notes with Chimera first.</span>}
+      {stale && <span className="warn">{s.melody?.kind === "spoken" ? "Speak the current syllables with Chimera first." : "Sing the current notes with Chimera first."}</span>}
       <span className="dim">Folder {info?.shows}\{id} (kept out of git)</span>
     </div>
   );

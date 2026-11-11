@@ -359,7 +359,7 @@ class Renders:
         cmd, cwd = cli
         try:
             if is_spoken(s["melody"]):
-                args = ["render", "spoken", str(d / "melody.json"), str(d / "render"), voice]
+                args = ["render", "spoken", str(d / "melody.json"), str(d / "render"), voice, "--tele", str(d / "voice.tele")]
             else:
                 args = ["render", "notes", str(d / "melody.json"), str(d / "render"), voice, "--tele", str(d / "voice.tele")]
             p = subprocess.run(cmd + args, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -699,17 +699,19 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
     @app.post("/api/sessions/{sid}/show")
     def session_show(sid: str, body: ShowIn):
         """A show for Chimera's duet page (?show=<id>): the mix, the voice's telemetry and its
-        melody, in public/shows/<id>/ (gitignored there)."""
+        melody (or speech file: the page shows its syllables, and replays it without singing it
+        live), in public/shows/<id>/ (gitignored there)."""
         s = store.load(sid)
         if not repo:
             raise HTTPException(503, "Chimera checkout not found")
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,40}", body.show_id):
             raise HTTPException(400, "show id: lowercase letters, digits, - and _")
-        if is_spoken(s.get("melody")):
-            raise HTTPException(409, "the duet page sings melodies: speech is heard here (Sing with Chimera) and in the downloaded file")
         r = s.get("render")
         if not r or r.get("melody") != s.get("melody"):
             raise HTTPException(409, "render the current notes first")
+        if not (store.dir(sid) / "voice.tele").exists():
+            # a speech render made before `render spoken` recorded its telemetry
+            raise HTTPException(409, "render it with Chimera again first (the head's movements weren't recorded)")
         d = store.dir(sid)
         out = repo / "public" / "shows" / body.show_id
         out.mkdir(parents=True, exist_ok=True)

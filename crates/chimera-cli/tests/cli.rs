@@ -452,3 +452,33 @@ fn render_notes_tele_records_the_live_telemetry_without_changing_the_sound() {
     let a_lip = artic["frames"][96][lip].as_f64().unwrap(); // 0.96 s = 60 tele hops
     assert!((at(60, 11 + lip) as f64 - a_lip).abs() < 1e-3, "lipAp {} vs {a_lip}", at(60, 11 + lip));
 }
+
+#[test]
+fn render_spoken_tele_records_the_telemetry_for_the_duet_page_without_changing_the_sound() {
+    // the converter's speech file: a syllable's vowel time and end, pitch and level contours
+    let speech = tmp("tele-spoken.json");
+    let hz: Vec<String> = (0..200).map(|i| format!("{:.1}", 110.0 + 20.0 * (i as f64 * 0.03).sin())).collect();
+    std::fs::write(
+        &speech,
+        format!(
+            r#"{{"kind": "spoken", "lang": "fi", "lyrics": "Hy-vää huo-men-ta", "syllables": [[0.4, 0.58], [0.6, 0.8], [0.85, 1.0], [1.05, 1.2], [1.25, 1.6]],
+               "f0": {{"t0": 0, "hop": 0.01, "hz": [{}]}}}}"#,
+            hz.join(",")
+        ),
+    )
+    .unwrap();
+    let (plain, tracked, tele) = (tmp("spoken-plain"), tmp("spoken-tracked"), tmp("spoken.tele"));
+    chimera(&["render", "spoken", &speech, &plain, "male"]);
+    let stdout = chimera(&["render", "spoken", &speech, &tracked, "male", "--tele", &tele]);
+    let a = std::fs::read(format!("{plain}.wav")).unwrap();
+    let b = std::fs::read(format!("{tracked}.wav")).unwrap();
+    assert!(a == b, "--tele changed the sound");
+    let samples = (a.len() - 44) / 2;
+    let t = std::fs::read(&tele).unwrap();
+    assert_eq!(&t[..4], b"CHTL");
+    let u = |i: usize| u32::from_le_bytes(t[4 + 4 * i..8 + 4 * i].try_into().unwrap()) as usize;
+    let (hop, frames, len) = (u(2), u(3), u(4));
+    assert_eq!(hop, 768);
+    assert_eq!(frames, 1 + samples / hop, "{stdout}"); // frame 0, then one per whole hop
+    assert_eq!(t.len(), 52 + 4 * frames * len);
+}

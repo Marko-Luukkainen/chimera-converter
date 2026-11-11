@@ -21,7 +21,7 @@ if a[:2] not in (["render", "notes"], ["render", "spoken"]):
 m = json.load(open(a[2], encoding="utf-8"))
 if a[1] == "spoken":
     open(a[3] + ".args", "w").write(" ".join(a))
-    assert m["kind"] == "spoken" and len(m["syllables"]) > 1 and "--tele" not in a
+    assert m["kind"] == "spoken" and len(m["syllables"]) > 1
     m["notes"] = m["syllables"]
 elif len(m["notes"]) == 1:
     sys.exit(1)  # the syllable probe: no list, so the converter skips the check
@@ -317,7 +317,8 @@ def test_rap_needs_a_song_converted_with_the_alignment(client, tmp_path):
 
 def test_speech_is_said_by_chimeras_speech_planner_and_follows_edits(client, tmp_path, monkeypatch):
     """Speech: the speech file (timing, pitch and level contours) instead of notes; Chimera's
-    `render spoken`; an edit moves a syllable's contour with it; live and duet are melody-only."""
+    `render spoken`; an edit moves a syllable's contour with it; a duet show replays it, the live
+    Sing mode is melody-only."""
     monkeypatch.setattr("chimera_convert.align.emissions", fake_emissions)
     import chimera_convert.pipeline as pl
 
@@ -359,6 +360,17 @@ def test_speech_is_said_by_chimeras_speech_planner_and_follows_edits(client, tmp
     assert wait_rendered(client, sid)["state"] == "done"
     assert "render spoken" in (client.sessions / sid / "render.args").read_text()
     assert client.post(f"/api/sessions/{sid}/live").status_code == 409
+    # the duet show: the head's telemetry recorded, the speech file for the words at its mouth
+    assert "--tele" in (client.sessions / sid / "render.args").read_text()
+    r = client.post(f"/api/sessions/{sid}/show", json={"show_id": "puhe", "mix": "both"})
+    assert r.status_code == 200, r.text
+    show_dir = client.repo / "public" / "shows" / "puhe"
+    show = json.loads((show_dir / "show.json").read_text(encoding="utf-8"))
+    assert show["voices"][0] == {"name": "Chimera", "tele": "voice.tele", "melody": "melody.json"}
+    assert json.loads((show_dir / "melody.json").read_text(encoding="utf-8"))["kind"] == "spoken"
+    assert (show_dir / "voice.tele").read_bytes() == b"TELE"
+    # a speech render from before the telemetry: render again first
+    (client.sessions / sid / "voice.tele").unlink()
     assert client.post(f"/api/sessions/{sid}/show", json={"show_id": "puhe"}).status_code == 409
     # back to singing: singing keeps its held notes, so the kept voice is analysed again (no stop
     # for the review), and speech with the held tones kept is the same analysis
