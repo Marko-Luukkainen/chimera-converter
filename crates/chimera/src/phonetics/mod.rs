@@ -1,4 +1,5 @@
-//! Phonetics: IPA, English and Finnish G2P, syllables, durations, the gestural planner, singing, beatbox.
+//! Phonetics: IPA, English and Finnish G2P, syllables, durations, the gestural planner, singing,
+//! speech at a recording's times (`spoken`), beatbox.
 //! These run off the audio thread (they allocate); their output is a [`Plan`] of gestures that a
 //! voice plays.
 
@@ -14,6 +15,7 @@ pub mod ipa;
 pub mod planner;
 pub mod sing;
 pub mod songs;
+pub mod spoken;
 pub mod syllables;
 pub mod vowel_data;
 

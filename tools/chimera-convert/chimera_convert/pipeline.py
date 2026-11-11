@@ -135,9 +135,12 @@ class Analysis:
     """what the separation found worth telling (audio.lead_losses)"""
     env: np.ndarray | None = None
     """the vowel band's energy every 5 ms (rap.vowel_envelope), for rap's sharper syllable onsets"""
+    held_removed: bool = False
+    """the held tones (organ, pads) were taken out of the voice first (audio.remove_held_tones: speech)"""
 
 
-STYLES = ("sing", "rap")
+STYLES = ("sing", "rap", "speech")
+"""sing: notes first; rap: words first, sung notes; speech: words first, said (speech.py)"""
 
 
 def retranscribe(an: Analysis, singing: "transcribe.Detection | None" = None) -> Analysis:
@@ -162,7 +165,7 @@ def save_analysis(path: Path, an: Analysis) -> None:
     if an.env is not None:
         extra["env"] = an.env.astype(np.float16)
     np.savez_compressed(tmp, hz=an.hz, per=an.per, rms=an.rms, pitch_method=an.pitch_method, voice_only=an.voice_only,
-                        duration=an.duration, **extra)
+                        duration=an.duration, held_removed=an.held_removed, **extra)
     tmp.replace(path)
 
 
@@ -173,14 +176,26 @@ def load_analysis(path: Path, singing: "transcribe.Detection | None" = None) -> 
         em = (d["lp"].astype(np.float32), float(d["frame"]), json.loads(str(d["vocab"])), int(d["blank"]))
     an = Analysis(None, np.zeros(0), np.zeros(0), str(d["pitch_method"]), hz=d["hz"], per=d["per"], rms=d["rms"],
                   voice_only=bool(d["voice_only"]), em=em, duration=float(d["duration"]),
-                  env=d["env"].astype(np.float32) if "env" in d else None)
+                  env=d["env"].astype(np.float32) if "env" in d else None,
+                  held_removed=bool(d["held_removed"]) if "held_removed" in d else False)
     return retranscribe(an, singing)
+
+
+def analysed_held_removed(path: Path) -> bool:
+    """Whether a cached analysis was made with the held tones taken out (speech)."""
+    try:
+        d = np.load(path)
+        return bool(d["held_removed"]) if "held_removed" in d else False
+    except (OSError, ValueError):
+        return False
 
 
 def analyze_audio(path: Path, separate: bool, device: str, pitch_method: str | None = None,
                   vocals_out: Path | None = None, progress: Progress = _quiet,
                   singing: "transcribe.Detection | None" = None, voice_only: bool | None = None,
-                  separator: str = "htdemucs", lead_only: bool = False) -> Analysis:
+                  separator: str = "htdemucs", lead_only: bool = False, remove_held: bool = False) -> Analysis:
+    """remove_held: take the held tones (an organ, pads) out of the voice first: speech only
+    (audio.remove_held_tones)."""
     warnings: list[str] = []
     if separate:
         progress("separating the voice", 0.0)
@@ -192,6 +207,9 @@ def analyze_audio(path: Path, separate: bool, device: str, pitch_method: str | N
     else:
         progress("loading", 0.0)
         y16 = audio.load(path, 16000)
+    if remove_held:
+        progress("removing held tones", 0.0)
+        y16 = audio.remove_held_tones(y16, 16000)
     if pitch_method is None:
         try:
             import torchcrepe  # noqa: F401
@@ -205,7 +223,7 @@ def analyze_audio(path: Path, separate: bool, device: str, pitch_method: str | N
 
     an = Analysis(y16, np.zeros(0), np.zeros(0), pitch_method, vocals_out if separate else None, hz=hz, per=per, rms=rms,
                   voice_only=separate if voice_only is None else voice_only, duration=len(y16) / 16000,
-                  warnings=warnings, env=vowel_envelope(y16))
+                  warnings=warnings, env=vowel_envelope(y16), held_removed=remove_held)
     return retranscribe(an, singing)
 
 
@@ -251,9 +269,9 @@ def place_notes(lyr: Lyrics, an: Analysis, align_mode: str, device: str, o: note
     doubtful: list[int] = []
     if style not in STYLES:
         raise ValueError(f"style must be one of {', '.join(STYLES)}")
-    if style == "rap":
+    if style in ("rap", "speech"):
         if align_mode != "mms":
-            raise ValueError("the rap style needs the lyrics alignment (align: mms): it places the words first")
+            raise ValueError(f"the {style} style needs the lyrics alignment (align: mms): it places the words first")
         from . import align, rap
 
         progress("aligning the lyrics", 0.0)
@@ -268,7 +286,7 @@ def place_notes(lyr: Lyrics, an: Analysis, align_mode: str, device: str, o: note
         det = an.singing or transcribe.Detection()
         r = rap.place(lyr.words, an.em, an.tr.frames, an.tr.tuning, an.env, det.gate_db, an.voice_only,
                       rap_opts or rap.Opts(rest=o.rest))
-        log(f"rap: {len(r.notes)} syllables, {r.moved} onsets sharpened on the vowels, "
+        log(f"{style}: {len(r.notes)} syllables, {r.moved} onsets sharpened on the vowels, "
             f"{r.unpitched} with no clear pitch of their own (pitch from their neighbours)")
         if not r.notes:
             raise ValueError("no notes found (is there a voice in the recording?)")
@@ -308,6 +326,14 @@ class Melody:
     sounding: int = 0
     melismas: int = 0
     rests: int = 0
+
+
+def spoken_contours(an: Analysis):
+    """The speech style's pitch and level contours from an analysis (speech.contours)."""
+    from . import speech
+
+    fr = an.tr.frames
+    return speech.contours(an.hz, fr.clear if fr.clear is not None else fr.voiced, fr.db)
 
 
 def check_notes(ns: list[notes.Note], n_syl: int) -> list[str]:

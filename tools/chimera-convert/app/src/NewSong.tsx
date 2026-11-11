@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api, ApiError, LANG_NAMES, type Detection, type Info, type Lang, type RapSettings, type Style } from "./api.ts";
-import { RAP_DEFAULTS, RapSettingsFields, SeparationFields } from "./Style.tsx";
+import { api, ApiError, LANG_NAMES, type Detection, type Info, type Lang, type RapSettings, type SpeechSettings, type Style } from "./api.ts";
+import { RAP_DEFAULTS, RapSettingsFields, SPEECH_DEFAULTS, STYLE_HELP, STYLE_NAMES, SeparationFields, SpeechSettingsFields } from "./Style.tsx";
 
 type LangChoice = "auto" | Lang;
 
@@ -17,6 +17,8 @@ export function NewSong(props: { onCreated: (id: string) => void; info?: Info | 
   const [style, setStyle] = useState<Style>("sing");
   const [rap, setRap] = useState<RapSettings | null>(null);
   const rapValue = rap ?? props.info?.rap_defaults ?? RAP_DEFAULTS;
+  const [speech, setSpeech] = useState<SpeechSettings | null>(null);
+  const speechValue = speech ?? props.info?.speech_defaults ?? SPEECH_DEFAULTS;
   const [separator, setSeparator] = useState("htdemucs");
   const [leadOnly, setLeadOnly] = useState(false);
   const [det, setDet] = useState<Detection | null>(null);
@@ -55,6 +57,7 @@ export function NewSong(props: { onCreated: (id: string) => void; info?: Info | 
     form.append("align", align);
     form.append("style", style);
     if (style === "rap") form.append("rap", JSON.stringify(rapValue));
+    if (style === "speech") form.append("speech", JSON.stringify(speechValue));
     if (separate) {
       form.append("separator", separator);
       form.append("lead_only", String(leadOnly));
@@ -112,7 +115,7 @@ export function NewSong(props: { onCreated: (id: string) => void; info?: Info | 
           value={lyrics}
           onChange={(e) => setLyrics(e.target.value)}
           rows={9}
-          placeholder={"Write the lyrics as they are sung.\nLine breaks and commas are breaths."}
+          placeholder={"Write the words as they are sung or said.\nLine breaks and commas are breaths."}
         />
       </label>
 
@@ -144,31 +147,30 @@ export function NewSong(props: { onCreated: (id: string) => void; info?: Info | 
       <fieldset className="field style-field">
         <span>Style</span>
         <div className="seg">
-          {(["sing", "rap"] as Style[]).map((k) => (
+          {(["sing", "rap", "speech"] as Style[]).map((k) => (
             <button
               key={k}
               type="button"
               className={style === k ? "on" : ""}
               onClick={() => {
                 setStyle(k);
-                if (k === "rap") setAlign("mms");
+                if (k !== "sing") setAlign("mms");
+                // speech over music: RoFormer leaves no organ or pads in the voice (Demucs does)
+                if (k === "speech" && props.info?.separators?.roformer) setSeparator("roformer");
               }}
             >
-              {k === "sing" ? "Singing" : "Rap"}
+              {STYLE_NAMES[k]}
             </button>
           ))}
         </div>
-        <div className="dim">
-          {style === "sing"
-            ? "Notes first, syllables on them: held notes, melismas and vibrato."
-            : "Words first, one note per syllable at the pitch inside it: fast flows and speech-like pitch. Keep the ad-libs that are on the recording in the lyrics."}
-        </div>
+        <div className="dim">{STYLE_HELP[style]}</div>
         {style === "rap" && <RapSettingsFields value={rapValue} onChange={setRap} defaults={props.info?.rap_defaults} />}
+        {style === "speech" && <SpeechSettingsFields value={speechValue} onChange={setSpeech} defaults={props.info?.speech_defaults} />}
       </fieldset>
 
       <label className="check">
         Lyrics alignment
-        <select value={align} onChange={(e) => setAlign(e.target.value)} name="align" disabled={style === "rap"}>
+        <select value={align} onChange={(e) => setAlign(e.target.value)} name="align" disabled={style !== "sing"}>
           <option value="mms">Automatic (speech alignment model)</option>
           <option value="none">In order (no model, needs more fixing)</option>
         </select>

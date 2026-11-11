@@ -193,6 +193,9 @@ function EditorBody({ s, info, onReview }: { s: Session; info: Info | null; onRe
   const saveTimer = useRef(0);
 
   const nSyl = s.syllables!.length;
+  /** the speech style: said by Chimera's speech planner (no vibrato, no live or duet pages) */
+  const spoken = s.melody?.kind === "spoken";
+  const melodyOnly = "Chimera's live and duet pages sing melodies: speech is heard here (Speak with Chimera) and in the downloaded file";
   const sylsPerWord = useMemo(() => s.lyrics!.words.map((w) => w.syls.length), [s]);
   // only English folds a melisma inside a word (Finnish words are written in parts around it)
   const flagged = useMemo(() => (s.lang === "en" ? innerMelismas(notes, s.syl_word!, sylsPerWord) : new Set<number>()), [notes, s, sylsPerWord]);
@@ -458,23 +461,33 @@ function EditorBody({ s, info, onReview }: { s: Session; info: Info | null; onRe
               }}
             />
           </label>
-          <label title="Vibrato depth in cents">
-            Vibrato
-            <input
-              type="number"
-              min={0}
-              max={150}
-              step={5}
-              value={vibrato}
-              onChange={(e) => {
-                const v = Number(e.target.value) || 0;
-                setVibrato(v);
-                save(notes, body, transpose, v);
-              }}
-            />
-          </label>
+          {!spoken && (
+            <label title="Vibrato depth in cents">
+              Vibrato
+              <input
+                type="number"
+                min={0}
+                max={150}
+                step={5}
+                value={vibrato}
+                onChange={(e) => {
+                  const v = Number(e.target.value) || 0;
+                  setVibrato(v);
+                  save(notes, body, transpose, v);
+                }}
+              />
+            </label>
+          )}
           <button className="primary" onClick={doRender} disabled={!!busy || !info?.chimera_cli} title={info?.chimera_cli ? "" : "chimera.exe is missing"}>
-            {busy === "render" ? `Chimera is singing … ${Math.round((job?.progress ?? 0) * 100)} %` : stale ? "Sing with Chimera" : "Sung ✓"}
+            {busy === "render"
+              ? `Chimera is ${spoken ? "speaking" : "singing"} … ${Math.round((job?.progress ?? 0) * 100)} %`
+              : stale
+                ? spoken
+                  ? "Speak with Chimera"
+                  : "Sing with Chimera"
+                : spoken
+                  ? "Spoken ✓"
+                  : "Sung ✓"}
           </button>
         </div>
         <div className="group">
@@ -495,11 +508,16 @@ function EditorBody({ s, info, onReview }: { s: Session; info: Info | null; onRe
             Singing…
           </button>
           <a className="button" href={api.file(s.id, "melody.json")} download={`${s.title}.json`}>
-            Download melody
+            {spoken ? "Download speech file" : "Download melody"}
           </a>
           <button
             className="primary"
-            title="Sing it in Chimera's Sing mode, where the voice controls (vibrato, breath, tone, transpose …) work while it sings. Start Chimera with start_chimera.bat."
+            disabled={spoken}
+            title={
+              spoken
+                ? melodyOnly
+                : "Sing it in Chimera's Sing mode, where the voice controls (vibrato, breath, tone, transpose …) work while it sings. Start Chimera with start_chimera.bat."
+            }
             onClick={async () => {
               clearTimeout(saveTimer.current);
               const tab = window.open("about:blank", "chimera");
@@ -516,7 +534,9 @@ function EditorBody({ s, info, onReview }: { s: Session; info: Info | null; onRe
           >
             Open in Chimera (live)
           </button>
-          <button onClick={() => setShowOpen((v) => !v)}>Duet show…</button>
+          <button onClick={() => setShowOpen((v) => !v)} disabled={spoken} title={spoken ? melodyOnly : ""}>
+            Duet show…
+          </button>
         </div>
       </div>
 

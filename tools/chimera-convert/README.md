@@ -66,6 +66,45 @@ What a real song showed (a 3:10 Finnish rap, 590 syllables, Quadro T2000):
   of the choruses, sung there by other voices, and the chorus lyrics piled onto what was left.
   The converter now says where that happens; leave those lines out of the lyrics or don't use it.
 
+### Speech (`--style speech`)
+
+Speech is said, not sung: notes per syllable flatten the intonation into steps, and the song
+planner holds vowels and adds vibrato. The speech style keeps Chimera's speech voice (the
+language's own articulation, aspiration and quantity) and gives it the recording's prosody
+(`speech.py`, and in Chimera `render spoken`, `crates/chimera/src/phonetics/spoken.rs`):
+
+1. **Timing**: each syllable's vowel onset and end as in rap (words first, onsets moved onto the
+   vowels). A silence of at least 0.25 s is a pause: Chimera breathes there.
+2. **Intonation**: the speaker's pitch contour every 10 ms (clear frames, octave slips dropped,
+   gaps held), as intervals from the speaker's median, at the chosen voice's own range (a male
+   voice says a woman's sentence an octave down) or at the speaker's own pitch. Intonation %
+   scales the rises and falls.
+3. **Stresses**: each syllable's loudness relative to the loud end of the speech drives Chimera's
+   breath, so stressed and emphasised syllables come out as strong as they were said. Stresses %
+   scales it.
+
+The editor shows one note per syllable at its median pitch: moving a syllable stretches the
+contours with it, raising or lowering it shifts its stretch of the intonation. The file is a
+speech file (`"kind": "spoken"`), not a melody: Chimera's live Sing mode and duet page sing
+melodies, so speech plays in the converter (Speak with Chimera) and from the file.
+
+Measured with Chimera's own speech as the recording (a 12-syllable Finnish sentence, the
+alignment model replaced by known times): the speech said back followed the pitch with a median
+error of 0.2 semitones (90-99 % of frames within one), and three syllables spoken 5.3 dB
+louder came back 6.2 dB louder (syllable levels correlated 0.92). Without the level contour the
+same syllables came out 1.8 dB quieter: the stresses would be lost.
+
+**Speech over music** (a sermon over a church organ, 3.5 min): Demucs leaves the organ in the
+voice, and its notes held for seconds read as the speaker's pitch (syllables an octave up, flat)
+and hold syllables over the pauses. So for speech the converter takes out of the voice every
+tone held for about two seconds (speech never holds one that long; Remove held tones in the app,
+`--no-remove-held-tones` to keep them), and uses RoFormer when it is installed. Against the
+priest's pitch tracked on RoFormer's clean voice, per syllable: Demucs correlated 0.82, Demucs
+with the held tones out 0.84 (and 22 silences inside words down to 10), RoFormer 0.94, RoFormer
+with the held tones out 0.97 (one syllable off by more than 5 semitones). RoFormer took 17.5
+minutes on a Quadro T2000, Demucs 1.5. A silence inside a word (a slow "kaik- ... -ki") is a held
+consonant in Chimera, never a breath.
+
 **Language** is read from the lyrics (Finnish or English). When the words don't tell (too few,
 both languages, or they look like another language such as Swedish), the converter asks: the app
 shows a language choice, and the command line stops and asks for `--lang fi` or `--lang en`. You
@@ -79,11 +118,12 @@ browser. Close the window to stop it.
 1. **New song**: drop a recording and type the lyrics. The language is detected as you type
    (Language: Detect); if it is unsure, choose Finnish or English before converting. Choose
    "Separate the voice" for a finished song with its backing (and the separator: Demucs, Demucs
-   fine-tuned or RoFormer; the lead voice alone). Style: Singing or Rap; Rap shows its settings:
-   the shortest silence that is a rest, how far onsets move onto vowels, what rise starts a vowel,
-   which part of a syllable gives its pitch, and pitch to the cent. In the editor, Style "Change…"
-   switches between singing and rap or changes the rap settings: the notes are made again from
-   the analysis already made, in seconds (edits are lost).
+   fine-tuned or RoFormer; the lead voice alone). Style: Singing, Rap or Speech. Rap shows its
+   settings: the shortest silence that is a rest, how far onsets move onto vowels, what rise
+   starts a vowel, which part of a syllable gives its pitch, and pitch to the cent. Speech shows
+   the pitch (the voice's range or the speaker's own), Intonation %, Stresses %, and the pause and
+   onset settings. In the editor, Style "Change…" switches between them or changes the settings:
+   it is converted again from the analysis already made, in seconds (edits are lost).
 2. **Conversion** shows its progress (the first run downloads the models). First the audio is
    analysed (separation, pitch, the alignment model), then it stops at **What counts as singing**:
    the level and the pitch clarity over the whole song, with a green strip for what counts as
@@ -200,6 +240,8 @@ Then in Chimera (at the repo root):
 
 ```powershell
 .\target\release\chimera.exe render notes tools\chimera-convert\out\song.json song-chimera female
+# a speech file (--style speech)
+.\target\release\chimera.exe render spoken tools\chimera-convert\out\talk.json talk-chimera male
 ```
 
 ### Outputs
@@ -216,9 +258,12 @@ Then in Chimera (at the repo root):
 | Option | Default | Meaning |
 |---|---|---|
 | `--lang auto\|fi\|en` | `auto` | the lyrics' language; `auto` reads it from the words and stops to ask when unsure |
-| `--style sing\|rap` | `sing` | `rap`: words first, one note per syllable at the pitch inside it (see Rap) |
+| `--style sing\|rap\|speech` | `sing` | `rap`: words first, one note per syllable at the pitch inside it (see Rap); `speech`: a speech file for `chimera render spoken` (see Speech) |
+| `--speech-pitch voice\|speaker`, `--expression X`, `--dynamics X` | `voice`, 1, 1 | speech: the intonation at the voice's range or the speaker's pitch; its rises and falls and the stresses scaled |
+| `--remove-held-tones`, `--no-remove-held-tones` | on for speech | take tones held for seconds (an organ, pads the separator left) out of the voice before tracking it |
+| `--voice male\|female\|child\|neanderthal` | from the pitch | the voice the file is made for |
 | `--separate` | off | separate the voice from the backing first |
-| `--separator htdemucs\|htdemucs_ft\|roformer` | `htdemucs` | with `--separate`: `htdemucs_ft` is cleaner and about 4x slower; `roformer` the cleanest (scripts\install_separator.bat) |
+| `--separator htdemucs\|htdemucs_ft\|roformer` | `htdemucs` (speech: `roformer` when installed) | with `--separate`: `htdemucs_ft` is cleaner and about 4x slower; `roformer` the cleanest (scripts\install_separator.bat) |
 | `--lead-only` | off | with `--separate`: the lead voice alone, without backing vocals, doubles and ad-libs (scripts\install_separator.bat); warns where it drops a hook sung by other voices |
 | `--voice-only` | off | the recording is a voice alone (implied by `--separate`) |
 | `--gate DB`, `--clarity X`, `--rough X`, `--hold S` | suggested | what counts as singing (see the app's step 2) |
