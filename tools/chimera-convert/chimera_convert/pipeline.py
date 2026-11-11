@@ -137,7 +137,8 @@ class Analysis:
     """the vowel band's energy every 5 ms (rap.vowel_envelope), for rap's sharper syllable onsets"""
 
 
-STYLES = ("sing", "rap")
+STYLES = ("sing", "rap", "speech")
+"""sing: notes first; rap: words first, sung notes; speech: words first, said (speech.py)"""
 
 
 def retranscribe(an: Analysis, singing: "transcribe.Detection | None" = None) -> Analysis:
@@ -251,9 +252,9 @@ def place_notes(lyr: Lyrics, an: Analysis, align_mode: str, device: str, o: note
     doubtful: list[int] = []
     if style not in STYLES:
         raise ValueError(f"style must be one of {', '.join(STYLES)}")
-    if style == "rap":
+    if style in ("rap", "speech"):
         if align_mode != "mms":
-            raise ValueError("the rap style needs the lyrics alignment (align: mms): it places the words first")
+            raise ValueError(f"the {style} style needs the lyrics alignment (align: mms): it places the words first")
         from . import align, rap
 
         progress("aligning the lyrics", 0.0)
@@ -268,7 +269,7 @@ def place_notes(lyr: Lyrics, an: Analysis, align_mode: str, device: str, o: note
         det = an.singing or transcribe.Detection()
         r = rap.place(lyr.words, an.em, an.tr.frames, an.tr.tuning, an.env, det.gate_db, an.voice_only,
                       rap_opts or rap.Opts(rest=o.rest))
-        log(f"rap: {len(r.notes)} syllables, {r.moved} onsets sharpened on the vowels, "
+        log(f"{style}: {len(r.notes)} syllables, {r.moved} onsets sharpened on the vowels, "
             f"{r.unpitched} with no clear pitch of their own (pitch from their neighbours)")
         if not r.notes:
             raise ValueError("no notes found (is there a voice in the recording?)")
@@ -308,6 +309,14 @@ class Melody:
     sounding: int = 0
     melismas: int = 0
     rests: int = 0
+
+
+def spoken_contours(an: Analysis):
+    """The speech style's pitch and level contours from an analysis (speech.contours)."""
+    from . import speech
+
+    fr = an.tr.frames
+    return speech.contours(an.hz, fr.clear if fr.clear is not None else fr.voiced, fr.db)
 
 
 def check_notes(ns: list[notes.Note], n_syl: int) -> list[str]:

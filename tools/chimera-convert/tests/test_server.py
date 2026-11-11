@@ -16,10 +16,14 @@ from test_notes import SR, voice
 FAKE_CLI = r'''#!{py}
 import json, sys, wave, struct, math
 a = sys.argv[1:]
-if a[:2] != ["render", "notes"]:
+if a[:2] not in (["render", "notes"], ["render", "spoken"]):
     sys.exit(2)
 m = json.load(open(a[2], encoding="utf-8"))
-if len(m["notes"]) == 1:
+if a[1] == "spoken":
+    open(a[3] + ".args", "w").write(" ".join(a))
+    assert m["kind"] == "spoken" and len(m["syllables"]) > 1 and "--tele" not in a
+    m["notes"] = m["syllables"]
+elif len(m["notes"]) == 1:
     sys.exit(1)  # the syllable probe: no list, so the converter skips the check
 n = 48000 * 2
 with wave.open(a[3] + ".wav", "wb") as w:
@@ -309,3 +313,47 @@ def test_rap_needs_a_song_converted_with_the_alignment(client, tmp_path):
     assert wait_done(client, sid)["status"] == "done"
     r = client.post(f"/api/sessions/{sid}/style", json={"style": "rap"})
     assert r.status_code == 409 and "alignment" in r.json()["detail"]
+
+
+def test_speech_is_said_by_chimeras_speech_planner_and_follows_edits(client, tmp_path, monkeypatch):
+    """Speech: the speech file (timing, pitch and level contours) instead of notes; Chimera's
+    `render spoken`; an edit moves a syllable's contour with it; live and duet are melody-only."""
+    monkeypatch.setattr("chimera_convert.align.emissions", fake_emissions)
+    info = client.get("/api/info").json()
+    assert set(info["speech_defaults"]) == {"rest", "window", "min_rise", "nucleus", "expression", "dynamics", "pitch"}
+    wav = tmp_path / "puhe.wav"
+    sf.write(wav, voice(), SR)
+    with open(wav, "rb") as f:
+        r = client.post("/api/sessions", files={"audio": ("puhe.wav", f, "audio/wav")},
+                        data={"lyrics": "Pieni tähti,\ntuikkii yö", "lang": "fi", "align": "mms", "style": "speech", "review": "false",
+                              "speech": json.dumps({"pitch": "speaker", "expression": 1.5, "dynamics": 0.5})})
+    assert r.status_code == 200, r.text
+    sid = r.json()["id"]
+    s = wait_done(client, sid)
+    assert s["status"] == "done", s.get("error")
+    m = s["melody"]
+    assert m["kind"] == "spoken" and len(m["syllables"]) == len(s["syllables"]) == 7
+    assert s["options"]["speech"]["pitch"] == "speaker" and s["options"]["speech"]["expression"] == 1.5
+    assert (client.sessions / sid / "speech.npz").exists()
+    # an edit: the third syllable a semitone up -> its stretch of the pitch contour moves up
+    ns = s["notes"]
+    k = next(i for i, n in enumerate(ns) if n["syl"] == 2)
+    ns[k]["midi"] += 1
+    r = client.put(f"/api/sessions/{sid}/notes", json={"notes": ns, "body": "male", "vibrato": 0})
+    assert r.status_code == 200, r.text
+    m2 = r.json()["melody"]
+    a, b = m2["syllables"][2]
+    i0, i1 = int((a - m2["f0"]["t0"]) / 0.01) + 2, int((b - m2["f0"]["t0"]) / 0.01) - 2
+    up = [y / x for x, y in zip(m["f0"]["hz"][i0:i1], m2["f0"]["hz"][i0:i1]) if x > 0 and y > 0]
+    assert up and abs(12 * np.log2(np.median(up)) - 1.0) < 0.05
+    # Chimera speaks it
+    r = client.post(f"/api/sessions/{sid}/render", json={})
+    assert r.status_code == 200, r.text
+    assert wait_rendered(client, sid)["state"] == "done"
+    assert "render spoken" in (client.sessions / sid / "render.args").read_text()
+    assert client.post(f"/api/sessions/{sid}/live").status_code == 409
+    assert client.post(f"/api/sessions/{sid}/show", json={"show_id": "puhe"}).status_code == 409
+    # and back to singing from the same analysis
+    assert client.post(f"/api/sessions/{sid}/style", json={"style": "sing"}).status_code == 200
+    s = wait_done(client, sid)
+    assert s["status"] == "done" and "kind" not in s["melody"], s.get("error")

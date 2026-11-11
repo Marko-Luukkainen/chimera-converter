@@ -1,7 +1,7 @@
 import type { Note } from "./edit.ts";
 
 export type Lang = "fi" | "en";
-export type Style = "sing" | "rap";
+export type Style = "sing" | "rap" | "speech";
 
 /** the rap style's settings (server: rap.Opts): seconds, dB per 20 ms, a fraction */
 export interface RapSettings {
@@ -10,6 +10,20 @@ export interface RapSettings {
   min_rise: number;
   nucleus: number;
   keep_cents: boolean;
+}
+
+/** the speech style's settings (server: speech.Opts) */
+export interface SpeechSettings {
+  rest: number;
+  window: number;
+  min_rise: number;
+  nucleus: number;
+  /** "voice": the intonation at the chosen voice's range; "speaker": at the speaker's own pitch */
+  pitch: "voice" | "speaker";
+  /** pitch intervals scaled (1 = as spoken) */
+  expression: number;
+  /** loudness differences scaled (1 = as spoken) */
+  dynamics: number;
 }
 
 export interface Detection {
@@ -28,7 +42,9 @@ export interface Melody {
   lang: Lang;
   body: string;
   offset?: number;
-  notes: [number, number][];
+  notes?: [number, number][];
+  /** a speech file (the speech style): said by Chimera's speech planner, not sung */
+  kind?: "spoken";
 }
 
 export interface Session {
@@ -48,6 +64,7 @@ export interface Session {
     review?: boolean;
     style?: Style;
     rap?: RapSettings;
+    speech?: SpeechSettings;
     separator?: string | null;
     lead_only?: boolean;
   };
@@ -106,6 +123,7 @@ export interface Info {
   chimera_url: string;
   separators?: Record<string, boolean>;
   rap_defaults?: RapSettings;
+  speech_defaults?: SpeechSettings;
 }
 
 export class ApiError extends Error {
@@ -156,7 +174,8 @@ export const api = {
     }),
   setLang: (id: string, lang: Lang) => call<Summary>("POST", `/api/sessions/${id}/lang`, { lang }),
   /** sing it as rap or singing (or with other rap settings): the notes again from the kept analysis */
-  setStyle: (id: string, style: Style, rap?: RapSettings) => call<Summary>("POST", `/api/sessions/${id}/style`, { style, rap }),
+  setStyle: (id: string, style: Style, rap?: RapSettings, speech?: SpeechSettings) =>
+    call<Summary>("POST", `/api/sessions/${id}/style`, { style, rap, speech }),
   singing: (id: string) => call<SingingData>("GET", `/api/sessions/${id}/singing`),
   setSinging: (id: string, v: Singing) => call<Summary>("POST", `/api/sessions/${id}/singing`, v),
   review: (id: string, back = false) => call<Summary>("POST", `/api/sessions/${id}/review`, { back }),

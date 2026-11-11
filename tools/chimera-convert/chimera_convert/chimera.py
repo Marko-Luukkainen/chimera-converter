@@ -181,7 +181,18 @@ def write_csv(path: Path, notes: list[Note], syl_text: list[str], transpose: flo
 
 
 def write_json(path: Path, data: dict) -> None:
-    """Readable JSON: one note per line."""
+    """Readable JSON: one note per line; a speech file: one syllable per line, each contour on one."""
+    if "notes" not in data:
+        big = ("syllables", "f0", "level")
+        head = json.dumps({k: v for k, v in data.items() if k not in big}, ensure_ascii=False, indent=2)
+        parts = [head[:-2]]
+        if "syllables" in data:
+            parts.append('  "syllables": [\n' + ",\n".join("    " + json.dumps(x) for x in data["syllables"]) + "\n  ]")
+        for k in ("f0", "level"):
+            if k in data:
+                parts.append(f'  "{k}": ' + json.dumps(data[k], separators=(",", ":")))
+        path.write_text(",\n".join(parts) + "\n}\n", encoding="utf-8")
+        return
     head = json.dumps({k: v for k, v in data.items() if k != "notes"}, ensure_ascii=False, indent=2)
     notes = ",\n".join("    " + json.dumps(n) for n in data["notes"])
     path.write_text(head[:-2] + ',\n  "notes": [\n' + notes + "\n  ]\n}\n", encoding="utf-8")

@@ -1,6 +1,6 @@
 """chimera-convert: a sung recording + its lyrics -> a melody file for `chimera render notes`.
 
-    python -m chimera_convert song.mp3 lyrics.txt -o song.json [--lang fi|en] [--separate] [--style rap]
+    python -m chimera_convert song.mp3 lyrics.txt -o song.json [--lang fi|en] [--separate] [--style rap|speech]
 
 The language is read from the lyrics unless --lang names it; when the lyrics don't make it clear
 (too few words, both languages, or another language) the run stops and asks for --lang.
@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--lang", choices=["auto", "fi", "en"], default="auto",
                     help="the lyrics' language (default: read from the lyrics, asks when unsure)")
     ap.add_argument("--separate", action="store_true", help="separate the voice from a full mix first (Demucs)")
-    ap.add_argument("--style", choices=["sing", "rap"], default="sing",
+    ap.add_argument("--style", choices=["sing", "rap", "speech"], default="sing",
                     help="sing: notes first, syllables on them (default); rap: words first, one note per syllable "
                          "at the pitch inside it (fast flows, speech-like pitch)")
     ap.add_argument("--separator", choices=["htdemucs", "htdemucs_ft", "roformer"], default="htdemucs",
@@ -57,17 +57,24 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--rap-rise", type=float, default=None, help="rap: the rise (dB per 20 ms) that counts as a vowel starting (default 4)")
     ap.add_argument("--rap-nucleus", type=float, default=None,
                     help="rap: the part of a syllable (0.2-1, from its onset) whose pitch is its pitch (default 0.7)")
+    ap.add_argument("--speech-pitch", choices=["voice", "speaker"], default="voice",
+                    help="speech: the intonation at the voice's own range (default) or at the speaker's pitch")
+    ap.add_argument("--expression", type=float, default=1.0, help="speech: pitch intervals scaled (0.5 flatter, 1.5 livelier; default 1)")
+    ap.add_argument("--dynamics", type=float, default=1.0, help="speech: loudness differences scaled (0 even, 1 as spoken)")
+    ap.add_argument("--voice", choices=["male", "female", "child", "neanderthal"], default=None,
+                    help="the voice (default: from the recording's pitch)")
     ap.add_argument("--plot", action="store_true", help="also write a PNG of the pitch, notes and syllables")
     a = ap.parse_args(argv)
     rap = a.style == "rap"
+    spoken = a.style == "speech"
     if a.keep_cents is None:
         a.keep_cents = rap
     if a.vibrato is None:
         a.vibrato = 0.0 if rap else 35.0
     if a.rest is None:
         a.rest = 0.15 if rap else 0.25
-    if rap and a.align != "mms":
-        raise SystemExit("--style rap needs the lyrics alignment (--align mms): it places the words first")
+    if (rap or spoken) and a.align != "mms":
+        raise SystemExit(f"--style {a.style} needs the lyrics alignment (--align mms): it places the words first")
     if (a.lead_only or a.separator != "htdemucs") and not a.separate:
         raise SystemExit("--separator and --lead-only choose how the voice is separated: add --separate")
 
@@ -116,13 +123,32 @@ def main(argv: list[str] | None = None) -> int:
         from .rap import Opts as RapOpts
 
         ro = RapOpts.from_dict({"rest": a.rest, "window": None if a.rap_window is None else a.rap_window / 1000,
-                                "min_rise": a.rap_rise, "nucleus": a.rap_nucleus}) if rap else None
+                                "min_rise": a.rap_rise, "nucleus": a.rap_nucleus}) if rap or spoken else None
         pl = pipeline.place_notes(lyr, an, a.align, device, o, a.align_model, progress, style=a.style, rap_opts=ro)
         ns = pl.notes
         if pl.doubtful:
             pipeline.warn(f"{len(pl.doubtful)} syllables found no singing to sit on (check them): "
                           + " ".join(lyr.syl_text[k] for k in pl.doubtful[:20]) + (" …" if len(pl.doubtful) > 20 else ""))
-        mel = pipeline.build_melody(ns, lyr, a.rest, a.transpose, a.keep_cents, a.vibrato, a.audio.name, cli=cli)
+        if spoken:
+            from . import speech
+
+            so = speech.Opts.from_dict({**ro.__dict__, "pitch": a.speech_pitch, "expression": a.expression, "dynamics": a.dynamics})
+            c = pipeline.spoken_contours(an)
+            body = a.voice or speech.default_body(c)
+            sp = speech.build(ns, ns, lyr, c, so, body, a.transpose, a.audio.name, cli=cli)
+            for w in sp.warnings:
+                pipeline.warn(w)
+            chimera.write_json(out, sp.data)
+            chimera.write_csv(out.with_suffix(".csv"), ns, lyr.syl_text, a.transpose)
+            if a.plot:
+                from .plot import plot
+
+                plot(out.with_suffix(".png"), an.t, an.midi, ns, lyr.syl_text, a.transpose)
+            print(f"wrote {out}: speech, {sp.syllables} syllables, {sp.pauses} pauses, {so.pitch} pitch, voice {body}")
+            print(f"render: chimera render spoken {out} {out.with_suffix('')}-chimera {body}")
+            return 0
+        mel = pipeline.build_melody(ns, lyr, a.rest, a.transpose, a.keep_cents, a.vibrato, a.audio.name, cli=cli,
+                                    body=a.voice)
     except ValueError as e:
         raise SystemExit(str(e))
     for w in mel.warnings:

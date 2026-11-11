@@ -109,8 +109,40 @@ def keep_cents(opt: dict) -> bool:
     return bool((opt.get("rap") or {}).get("keep_cents", True))
 
 
+def speech_settings(opt: dict):
+    """The speech style's settings of a session (its defaults where the session has none)."""
+    from .speech import Opts
+
+    return Opts.from_dict(opt.get("speech"))
+
+
 def rest_of(opt: dict) -> float:
-    return rap_settings(opt).rest if opt.get("style", "sing") == "rap" else 0.25
+    style = opt.get("style", "sing")
+    return rap_settings(opt).rest if style == "rap" else speech_settings(opt).rest if style == "speech" else 0.25
+
+
+SPEECH = "speech.npz"
+"""the speech style's pitch and level contours, kept so an edit can make the speech file again"""
+
+
+def is_spoken(mel: dict | None) -> bool:
+    return bool(mel) and mel.get("kind") == "spoken"
+
+
+def spoken_file(d: Path, s: dict, ns: list[notes.Note], lyr, body: str, transpose: float, cli):
+    """The speech file for these notes, from the kept contours."""
+    from . import speech
+
+    auto = [notes.Note(n["start"], n["end"], n["midi"], n["syl"]) for n in s["auto_notes"]]
+    return speech.build(ns, auto, lyr, speech.Contours.load(d / SPEECH), speech_settings(s["options"]), body, transpose,
+                        s["files"]["original"], cli=cli)
+
+
+def clean_speech(r) -> dict:
+    """SpeechIn -> the session's speech settings, each in its range."""
+    from .speech import Opts
+
+    return Opts.from_dict(r.model_dump()).to_dict()
 
 
 def clean_rap(r) -> dict:
@@ -222,15 +254,26 @@ class Worker:
         text = (d / "lyrics.txt").read_text(encoding="utf-8")
         lyr = pipeline.prepare_lyrics(text, s["lang"], self.cli, self.repo)
         opt = s["options"]
-        rap = opt.get("style", "sing") == "rap"
-        ro = rap_settings(opt)
-        o = notes.Opts(rest=ro.rest if rap else 0.25)
+        style = opt.get("style", "sing")
+        rap = style == "rap"
+        ro = rap_settings(opt) if rap else speech_settings(opt).rap() if style == "speech" else None
+        o = notes.Opts(rest=ro.rest if ro else 0.25)
         pl = pipeline.place_notes(lyr, an, opt.get("align", "mms"), self.device, o, None, progress, log=lambda *_: None,
-                                  style=opt.get("style", "sing"), rap_opts=ro if rap else None)
+                                  style=style, rap_opts=ro)
         ns = pl.notes
-        vibrato = 0.0 if rap else 35.0
-        mel = pipeline.build_melody(ns, lyr, rest=o.rest, keep_cents=keep_cents(opt), vibrato=vibrato,
-                                    source=s["files"]["original"], cli=self.cli)
+        vibrato = 0.0 if ro else 35.0
+        if style == "speech":
+            from . import speech
+
+            c = pipeline.spoken_contours(an)
+            c.save(d / SPEECH)
+            body = s.get("body") if is_spoken(s.get("melody")) else None
+            body = body or speech.default_body(c)
+            sp = speech.build(ns, ns, lyr, c, speech_settings(opt), body, 0.0, s["files"]["original"], cli=self.cli)
+            mel = pipeline.Melody(sp.data, sp.warnings)
+        else:
+            mel = pipeline.build_melody(ns, lyr, rest=o.rest, keep_cents=keep_cents(opt), vibrato=vibrato,
+                                        source=s["files"]["original"], cli=self.cli)
         midi = [None if not np.isfinite(v) else round(float(v), 2) for v in an.midi]
         s = self.store.load(sid)
         s.update(status="done", stage="Done", progress=1.0, lyrics=lyr.to_dict(), phase="notes",
@@ -254,6 +297,10 @@ def write_melody(d: Path, data: dict, ns: list[notes.Note], syl_text: list[str])
 # ----------------------------------------------------------------------------- Chimera singing
 
 def melody_seconds(mel: dict) -> float:
+    if is_spoken(mel):
+        from .speech import seconds
+
+        return seconds(mel)
     beat = 60.0 / float(mel.get("bpm", 60))
     return float(mel.get("t0", 0.3)) + sum(float(n[1]) for n in mel.get("notes", [])) * beat
 
@@ -303,8 +350,11 @@ class Renders:
         d = self.store.dir(sid)
         cmd, cwd = cli
         try:
-            p = subprocess.run(cmd + ["render", "notes", str(d / "melody.json"), str(d / "render"), voice, "--tele", str(d / "voice.tele")],
-                               cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            if is_spoken(s["melody"]):
+                args = ["render", "spoken", str(d / "melody.json"), str(d / "render"), voice]
+            else:
+                args = ["render", "notes", str(d / "melody.json"), str(d / "render"), voice, "--tele", str(d / "voice.tele")]
+            p = subprocess.run(cmd + args, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
             if p.returncode != 0:
                 raise RuntimeError(f"chimera render failed: {p.stderr.strip()[-400:]}")
             took = time.time() - j["started"]
@@ -371,9 +421,20 @@ class RapIn(BaseModel):
     keep_cents: bool = True
 
 
+class SpeechIn(BaseModel):
+    rest: float | None = None
+    window: float | None = None
+    min_rise: float | None = None
+    nucleus: float | None = None
+    pitch: str = "voice"
+    expression: float | None = None
+    dynamics: float | None = None
+
+
 class StyleIn(BaseModel):
     style: str
     rap: RapIn | None = None
+    speech: SpeechIn | None = None
 
 
 class ReviewIn(BaseModel):
@@ -421,7 +482,8 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
         return {"repo": str(repo) if repo else None, "chimera_cli": bool(cli), "gpu": gpu,
                 "shows": str(repo / "public" / "shows") if repo else None, "chimera_url": CHIMERA_DEV_URL,
                 "separators": {"htdemucs": True, "htdemucs_ft": True, "roformer": roformer},
-                "rap_defaults": {**rap_settings({}).to_dict(), "keep_cents": True}}
+                "rap_defaults": {**rap_settings({}).to_dict(), "keep_cents": True},
+                "speech_defaults": speech_settings({}).to_dict()}
 
     @app.post("/api/detect")
     def detect_lang(body: DetectIn):
@@ -438,13 +500,13 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
     async def sessions_new(audio: UploadFile = File(...), lyrics: str = Form(...), lang: str = Form("auto"),
                            separate: bool = Form(False), title: str = Form(""), align: str = Form("mms"),
                            review: bool = Form(True), style: str = Form("sing"), separator: str = Form("htdemucs"),
-                           lead_only: bool = Form(False), rap: str = Form("")):
+                           lead_only: bool = Form(False), rap: str = Form(""), speech: str = Form("")):
         if lang not in ("auto", "fi", "en"):
             raise HTTPException(400, "lang must be auto, fi or en")
         if style not in pipeline.STYLES:
-            raise HTTPException(400, "style must be sing or rap")
-        if style == "rap" and align != "mms":
-            raise HTTPException(400, "the rap style needs the automatic lyrics alignment")
+            raise HTTPException(400, "style must be sing, rap or speech")
+        if style in ("rap", "speech") and align != "mms":
+            raise HTTPException(400, f"the {style} style needs the automatic lyrics alignment")
         from .audio import SEPARATORS
 
         if separator not in SEPARATORS:
@@ -453,6 +515,10 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
             rap_in = RapIn(**json.loads(rap)) if rap.strip() else RapIn()
         except (ValueError, TypeError) as e:
             raise HTTPException(400, f"rap settings: {e}")
+        try:
+            speech_in = SpeechIn(**json.loads(speech)) if speech.strip() else SpeechIn()
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, f"speech settings: {e}")
         try:
             lang_used, det = pipeline.resolve_lang(lyrics, lang)
         except ValueError as e:
@@ -471,7 +537,7 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
              "lang": lang_used, "lang_requested": lang, "detection": det,
              "options": {"separate": separate, "align": align, "review": review, "style": style,
                          "separator": separator if separate else None, "lead_only": bool(lead_only and separate),
-                         "rap": clean_rap(rap_in)},
+                         "rap": clean_rap(rap_in), "speech": clean_speech(speech_in)},
              "files": {"original": f"original{ext}"},
              "phase": "analyze",
              "lyrics_text": lyrics}
@@ -501,15 +567,17 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
         """Sing it as rap or as singing, or with other rap settings: the notes are placed again from
         the cached analysis (no separation, pitch or alignment model runs again); edits are lost."""
         if body.style not in pipeline.STYLES:
-            raise HTTPException(400, "style must be sing or rap")
+            raise HTTPException(400, "style must be sing, rap or speech")
         s = store.load(sid)
         if s.get("status") in ("queued", "running"):
             raise HTTPException(409, "already converting")
-        if body.style == "rap" and s["options"].get("align", "mms") != "mms":
-            raise HTTPException(409, "this song was converted without the lyrics alignment, which the rap style needs: add it again with Automatic alignment")
+        if body.style in ("rap", "speech") and s["options"].get("align", "mms") != "mms":
+            raise HTTPException(409, f"this song was converted without the lyrics alignment, which the {body.style} style needs: add it again with Automatic alignment")
         opt = dict(s["options"], style=body.style)
         if body.rap is not None:
             opt["rap"] = clean_rap(body.rap)
+        if body.speech is not None:
+            opt["speech"] = clean_speech(body.speech)
         s = store.update(sid, options=opt, status="queued", stage="Queued", progress=0.0, render=None, phase="notes")
         worker.submit(sid)
         return summary(s)
@@ -577,10 +645,15 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
             ns = [notes.Note(float(n["start"]), float(n["end"]), float(n["midi"]), None if n.get("syl") is None else int(n["syl"]))
                   for n in body.notes]
             ns.sort(key=lambda n: n.start)
-            if lyr.lang != "fi":
-                ns = chimera.merge_inner_melismas(ns, lyr.syl_word, lyr.words, log=lambda *_: None)
-            mel = pipeline.build_melody(ns, lyr, rest=rest_of(s["options"]), transpose=body.transpose, vibrato=body.vibrato,
-                                        keep_cents=keep_cents(s["options"]), source=s["files"]["original"], body=body.body or s.get("body"), cli=worker.cli if worker else None)
+            if is_spoken(s.get("melody")):
+                sp = spoken_file(store.dir(sid), s, ns, lyr, body.body or s.get("body") or "male", body.transpose,
+                                 worker.cli if worker else None)
+                mel = pipeline.Melody(sp.data, sp.warnings)
+            else:
+                if lyr.lang != "fi":
+                    ns = chimera.merge_inner_melismas(ns, lyr.syl_word, lyr.words, log=lambda *_: None)
+                mel = pipeline.build_melody(ns, lyr, rest=rest_of(s["options"]), transpose=body.transpose, vibrato=body.vibrato,
+                                            keep_cents=keep_cents(s["options"]), source=s["files"]["original"], body=body.body or s.get("body"), cli=worker.cli if worker else None)
         except (ValueError, KeyError, TypeError) as e:
             raise HTTPException(400, str(e))
         s.update(notes=[asdict(n) for n in ns], melody=mel.data, warnings=s.get("analysis_warnings", []) + mel.warnings, body=mel.data["body"],
@@ -619,6 +692,8 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
             raise HTTPException(503, "Chimera checkout not found")
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,40}", body.show_id):
             raise HTTPException(400, "show id: lowercase letters, digits, - and _")
+        if is_spoken(s.get("melody")):
+            raise HTTPException(409, "the duet page sings melodies: speech is heard here (Sing with Chimera) and in the downloaded file")
         r = s.get("render")
         if not r or r.get("melody") != s.get("melody"):
             raise HTTPException(409, "render the current notes first")
@@ -645,6 +720,8 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
             raise HTTPException(503, "Chimera checkout not found")
         if not s.get("melody"):
             raise HTTPException(409, "no melody yet")
+        if is_spoken(s["melody"]):
+            raise HTTPException(409, "Chimera's Sing mode sings melodies: speech is heard here (Sing with Chimera) and in the downloaded file")
         out = repo / "public" / "shows" / "_live"
         out.mkdir(parents=True, exist_ok=True)
         data = dict(s["melody"], title=s["title"])
