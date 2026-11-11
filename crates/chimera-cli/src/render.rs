@@ -22,6 +22,7 @@ use chimera::phonetics::sing::{
     plan_song,
 };
 use chimera::phonetics::songs::DEMO_SONGS;
+use chimera::phonetics::spoken::{Contour, SpokenOptions, SpokenSyllable, plan_spoken};
 use chimera::phonetics::syllables::lyrics_to_syllables;
 use chimera::phonetics::{Intonation, Language, Syllable};
 use chimera::voice::human_voice::{HumanVoice, SCOPE_POINTS, SourcePatch, VoiceTelemetry};
@@ -627,6 +628,78 @@ pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         std::fs::write(path, r.bytes(body_mix(body_name)?)).map_err(|e| format!("{path}: {e}"))?;
         println!("{path}: {} telemetry frames every {TELE_HOP} samples", r.frames);
     }
+    Ok(())
+}
+
+/// Speech at a recording's times (the converter's speech style): the syllables of `lyrics` with
+/// their vowels at `syllables[k][0]` and their ends at `syllables[k][1]`, the pitch from `f0`
+/// (Hz every `hop` s from `t0`, 0 where there is none) and the loudness from `level` (0..1).
+/// `render spoken <in.json> <out> [male|female|child|neanderthal]`
+///
+/// The plan is scheduled as the render reaches it (a second ahead), so a long recording's contour
+/// gestures don't fill the score.
+pub fn spoken(ctx: &Ctx, a: &[String]) -> Result<(), String> {
+    let input = a.first().ok_or("render spoken <in.json> <out> [male|female|child|neanderthal]")?;
+    let out_name = wav_name(arg(a, 1, "out/spoken"));
+    let body_name = arg(a, 2, "male");
+    let b = body(body_name)?;
+    let text = std::fs::read_to_string(input).map_err(|e| format!("{input}: {e}"))?;
+    let j: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{input}: {e}"))?;
+    let language = match j["lang"].as_str() {
+        None | Some("en") => None,
+        Some("fi") => Some(Language::Finnish),
+        Some(x) => return Err(format!("{input}: unknown lang {x:?}; have en, fi")),
+    };
+    let lyrics = j["lyrics"].as_str().ok_or("lyrics missing")?;
+    let syl = match language {
+        Some(Language::Finnish) => chimera::phonetics::finnish::lyrics_to_syllables(lyrics),
+        _ => lyrics_to_syllables(lyrics, &g2p()?),
+    };
+    let times: Vec<[f64; 2]> = serde_json::from_value(j["syllables"].clone()).map_err(|e| format!("syllables: {e}"))?;
+    if syl.len() != times.len() {
+        return Err(format!("{} syllables for {} times: {}", syl.len(), times.len(),
+            syl.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ")));
+    }
+    let contour = |key: &str, vals: &str| -> Result<Contour, String> {
+        let c = &j[key];
+        if c.is_null() {
+            return Ok(Contour::default());
+        }
+        Ok(Contour {
+            t0: c["t0"].as_f64().unwrap_or(0.0),
+            hop: c["hop"].as_f64().ok_or(format!("{key}.hop missing"))?,
+            v: serde_json::from_value(c[vals].clone()).map_err(|e| format!("{key}: {e}"))?,
+        })
+    };
+    let f0 = contour("f0", "hz")?;
+    if f0.at(0.0).is_none() {
+        return Err(format!("{input}: the f0 contour has no pitch"));
+    }
+    let syls: Vec<SpokenSyllable> = syl.into_iter().zip(&times).map(|(syl, t)| SpokenSyllable { syl, at: t[0], end: t[1] }).collect();
+    let o = SpokenOptions { body: body_name.into(), language, f0, level: contour("level", "v")?, pause: j["pause"].as_f64() };
+    let plan = plan_spoken(&syls, &o);
+    let mut v = HumanVoice::new(FS, b, 2);
+    v.set_source(&SourcePatch::f0(o.f0.at(syls[0].at).unwrap_or(110.0)));
+    let mut gs: Vec<Gesture> = plan.gestures.clone();
+    gs.sort_by(|x, y| (x.t0 - x.ramp_in).total_cmp(&(y.t0 - y.ramp_in)));
+    let n = js_round(FS * (plan.end + 0.4)) as usize;
+    let mut out = vec![0f32; n];
+    let (mut next, mut done) = (0usize, 0usize);
+    let chunk = (FS * 0.25) as usize / 128 * 128;
+    while done < n {
+        let t = done as f64 / FS;
+        let mut batch = Vec::new();
+        while next < gs.len() && gs[next].t0 - gs[next].ramp_in < t + 1.0 {
+            batch.push(gs[next]);
+            next += 1;
+        }
+        v.schedule(&batch);
+        let b = (done + chunk).min(n);
+        render_blocks(&mut v, &mut out[done..b]);
+        done = b;
+    }
+    ctx.write_wav(&out_name, &out)?;
+    println!("{out_name}: {} s, peak {}, {} syllables", fixed(n as f64 / FS, 2), fixed(peak(&out), 3), syls.len());
     Ok(())
 }
 

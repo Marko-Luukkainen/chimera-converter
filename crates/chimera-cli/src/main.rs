@@ -24,6 +24,9 @@ usage: chimera <command> [args] [--float]
   render notes   <in.json> <out> [male|female|child|neanderthal] [--artic tracks.json] [--tele voice.tele]
                  (melody file; midi <= 0 is a rest; \"lang\": \"fi\" for Finnish lyrics;
                   --artic also writes the articulators at 100 Hz)
+  render spoken  <in.json> <out> [male|female|child|neanderthal]
+                 (speech at a recording's times: the converter's speech file, with \"lyrics\",
+                  \"syllables\": [[vowel, end] s ...], \"f0\": {t0, hop, hz}, \"level\": {t0, hop, v})
   render beatbox [outdir] [preset name | pattern] [male|female|child|neanderthal] [bpm] [bars]
   render creature [creatureId] [outdir]
   render vowels  [male|female|child|neanderthal] [out]
@@ -117,6 +120,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 "fi" => render::finnish(&ctx, rest),
                 "song" => render::song(&ctx, rest),
                 "notes" => render::notes(&ctx, rest),
+                "spoken" => render::spoken(&ctx, rest),
                 "beatbox" => render::beatbox(&ctx, rest),
                 "creature" => render::creature(&ctx, rest),
                 "vowels" => render::vowels(&ctx, rest),
