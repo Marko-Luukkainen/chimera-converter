@@ -1,6 +1,16 @@
 import type { Note } from "./edit.ts";
 
 export type Lang = "fi" | "en";
+export type Style = "sing" | "rap";
+
+/** the rap style's settings (server: rap.Opts): seconds, dB per 20 ms, a fraction */
+export interface RapSettings {
+  rest: number;
+  window: number;
+  min_rise: number;
+  nucleus: number;
+  keep_cents: boolean;
+}
 
 export interface Detection {
   lang: Lang | null;
@@ -32,7 +42,15 @@ export interface Session {
   lang: Lang;
   lang_requested: "auto" | Lang;
   detection: Detection;
-  options: { separate: boolean; align: string; review?: boolean; style?: "sing" | "rap" };
+  options: {
+    separate: boolean;
+    align: string;
+    review?: boolean;
+    style?: Style;
+    rap?: RapSettings;
+    separator?: string | null;
+    lead_only?: boolean;
+  };
   /** what counted as singing (the thresholds the notes were made with) */
   singing?: Singing;
   files: { original: string; vocals?: string };
@@ -86,6 +104,8 @@ export interface Info {
   gpu: string | null;
   shows: string | null;
   chimera_url: string;
+  separators?: Record<string, boolean>;
+  rap_defaults?: RapSettings;
 }
 
 export class ApiError extends Error {
@@ -135,6 +155,8 @@ export const api = {
       x.send(form);
     }),
   setLang: (id: string, lang: Lang) => call<Summary>("POST", `/api/sessions/${id}/lang`, { lang }),
+  /** sing it as rap or singing (or with other rap settings): the notes again from the kept analysis */
+  setStyle: (id: string, style: Style, rap?: RapSettings) => call<Summary>("POST", `/api/sessions/${id}/style`, { style, rap }),
   singing: (id: string) => call<SingingData>("GET", `/api/sessions/${id}/singing`),
   setSinging: (id: string, v: Singing) => call<Summary>("POST", `/api/sessions/${id}/singing`, v),
   review: (id: string, back = false) => call<Summary>("POST", `/api/sessions/${id}/review`, { back }),

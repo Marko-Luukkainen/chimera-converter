@@ -245,7 +245,9 @@ class Placement:
 
 
 def place_notes(lyr: Lyrics, an: Analysis, align_mode: str, device: str, o: notes.Opts,
-                align_model: str | None = None, progress: Progress = _quiet, log=print, style: str = "sing") -> Placement:
+                align_model: str | None = None, progress: Progress = _quiet, log=print, style: str = "sing",
+                rap_opts: "rap.Opts | None" = None) -> Placement:
+    """rap_opts: the rap style's settings (defaults, with `o.rest` as the rest, when None)."""
     doubtful: list[int] = []
     if style not in STYLES:
         raise ValueError(f"style must be one of {', '.join(STYLES)}")
@@ -264,7 +266,8 @@ def place_notes(lyr: Lyrics, an: Analysis, align_mode: str, device: str, o: note
         if an.env is None:
             log("rap: no vowel band envelope in this analysis (made by an older version): onsets are the model's")
         det = an.singing or transcribe.Detection()
-        r = rap.place(lyr.words, an.em, an.tr.frames, an.tr.tuning, an.env, det.gate_db, an.voice_only, rap.Opts(rest=o.rest))
+        r = rap.place(lyr.words, an.em, an.tr.frames, an.tr.tuning, an.env, det.gate_db, an.voice_only,
+                      rap_opts or rap.Opts(rest=o.rest))
         log(f"rap: {len(r.notes)} syllables, {r.moved} onsets sharpened on the vowels, "
             f"{r.unpitched} with no clear pitch of their own (pitch from their neighbours)")
         if not r.notes:

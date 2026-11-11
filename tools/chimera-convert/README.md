@@ -78,8 +78,12 @@ browser. Close the window to stop it.
 
 1. **New song**: drop a recording and type the lyrics. The language is detected as you type
    (Language: Detect); if it is unsure, choose Finnish or English before converting. Choose
-   "Separate the voice" for a finished song with its backing, and Style: Rap for rap (words first, one
-   note per syllable).
+   "Separate the voice" for a finished song with its backing (and the separator: Demucs, Demucs
+   fine-tuned or RoFormer; the lead voice alone). Style: Singing or Rap; Rap shows its settings:
+   the shortest silence that is a rest, how far onsets move onto vowels, what rise starts a vowel,
+   which part of a syllable gives its pitch, and pitch to the cent. In the editor, Style "Change…"
+   switches between singing and rap or changes the rap settings: the notes are made again from
+   the analysis already made, in seconds (edits are lost).
 2. **Conversion** shows its progress (the first run downloads the models). First the audio is
    analysed (separation, pitch, the alignment model), then it stops at **What counts as singing**:
    the level and the pitch clarity over the whole song, with a green strip for what counts as
@@ -227,6 +231,7 @@ Then in Chimera (at the repo root):
 | `--keep-cents`, `--no-keep-cents` | off (rap: on) | keep the sung pitch to the cent instead of the nearest note |
 | `--vibrato C` | 35 (rap: 0) | vibrato depth written to the file, in cents |
 | `--rest S` | 0.25 (rap: 0.15) | the shortest silence written as a rest |
+| `--rap-window MS`, `--rap-rise DB`, `--rap-nucleus F` | 80, 4, 0.7 | rap: how far an onset moves onto its vowel, the rise (dB per 20 ms) that starts a vowel, the part of a syllable that gives its pitch |
 
 ## The lyrics file
 
@@ -256,8 +261,8 @@ Then in Chimera (at the repo root):
   `target\release\chimera.exe` is built; without it unknown words are guessed. The converter
   checks the count against Chimera at the end and warns when it doesn't match.
 - Rap: the editor draws notes on the nearest semitone row, and dragging a note's pitch rounds it
-  (the file keeps the cents until then). In the app, the separator choice and `--lead-only` are
-  command line only.
+  (the file keeps the cents until then). The separator is chosen when a song is added (it is part
+  of the analysis); changing it means adding the song again.
 - Files made from copyrighted recordings must not be added to Chimera's git repo (the repo's
   rule). Keep them in `out\` or outside the repo.
 

@@ -51,6 +51,21 @@ class Opts:
     last_max: float = 1.0
     """the longest the last syllable before the end of the song may sound (s)"""
 
+    # the settings the app and the CLI let the user set, with their allowed ranges
+    LIMITS = {"rest": (0.05, 1.0), "window": (0.0, 0.2), "min_rise": (1.0, 15.0), "nucleus": (0.2, 1.0)}
+
+    def to_dict(self) -> dict:
+        return {k: round(float(getattr(self, k)), 3) for k in self.LIMITS}
+
+    @staticmethod
+    def from_dict(d: dict | None) -> "Opts":
+        """The user's settings, each clipped to its range; missing ones keep their defaults."""
+        o = Opts()
+        for k, (lo, hi) in Opts.LIMITS.items():
+            if d and d.get(k) is not None:
+                setattr(o, k, float(np.clip(float(d[k]), lo, hi)))
+        return o
+
 
 @dataclass
 class Result:

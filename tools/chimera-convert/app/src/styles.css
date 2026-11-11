@@ -693,3 +693,64 @@ button.doubt {
   gap: 10px;
   align-items: center;
 }
+
+/* ---------- style: singing or rap (Style.tsx) */
+.style-field .dim {
+  margin-top: 4px;
+}
+.rap-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 22px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--frame);
+}
+.rap-settings label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rap-settings label > span {
+  color: var(--blue-mid);
+}
+.rap-settings i {
+  font-style: normal;
+  color: var(--blue-dim);
+}
+.separation {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 26px;
+}
+.style-chip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+}
+.style-chip > span:first-child {
+  color: var(--blue-mid);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.style-chip b {
+  color: var(--white);
+  font-weight: 500;
+}
+.panel.style-panel {
+  flex-basis: 100%;
+  display: grid;
+  gap: 10px;
+  max-width: none;
+}
+button.link {
+  border: none;
+  background: none;
+  color: var(--blue);
+  text-decoration: underline;
+  padding: 0;
+}

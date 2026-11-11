@@ -291,3 +291,15 @@ def test_a_word_with_no_syllable_is_reported_not_dropped_silently():
     ns = [Note(0.5 + 0.3 * k, 0.8 + 0.3 * k, 50, k) for k in range(len(lyr.syl_word))]
     mel = pipeline.build_melody(ns, lyr)
     assert any("MC" in w for w in mel.warnings)
+
+
+def test_rap_settings_are_clipped_and_reach_the_placement(flow):
+    o = rap.Opts.from_dict({"rest": 5.0, "window": -1, "min_rise": None, "nucleus": 0.5})
+    assert (o.rest, o.window, o.min_rise, o.nucleus) == (1.0, 0.0, 4.0, 0.5)
+    assert rap.Opts.from_dict(o.to_dict()) == o
+    # window 0: the onsets stay on the model's times (none sharpened)
+    _, onsets, _, lyr, an = flow
+    logs = []
+    pipeline.place_notes(lyr, an, "mms", "cpu", pipeline.notes.Opts(), style="rap", log=logs.append,
+                         rap_opts=rap.Opts.from_dict({"window": 0}))
+    assert "0 onsets sharpened" in logs[-1]

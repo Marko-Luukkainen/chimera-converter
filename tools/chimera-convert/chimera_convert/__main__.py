@@ -52,6 +52,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--rough", type=float, default=None,
                     help="0..1: how much a loud frame without a clear pitch counts as singing (rough voice; voice tracks only)")
     ap.add_argument("--hold", type=float, default=None, help="hold a syllable over gaps in the singing shorter than this (s, default 0.4)")
+    ap.add_argument("--rap-window", type=float, default=None,
+                    help="rap: how far (ms) a syllable's onset may move onto its vowel's rise (default 80, 0 keeps the model's times)")
+    ap.add_argument("--rap-rise", type=float, default=None, help="rap: the rise (dB per 20 ms) that counts as a vowel starting (default 4)")
+    ap.add_argument("--rap-nucleus", type=float, default=None,
+                    help="rap: the part of a syllable (0.2-1, from its onset) whose pitch is its pitch (default 0.7)")
     ap.add_argument("--plot", action="store_true", help="also write a PNG of the pitch, notes and syllables")
     a = ap.parse_args(argv)
     rap = a.style == "rap"
@@ -108,7 +113,11 @@ def main(argv: list[str] | None = None) -> int:
     print("singing: louder than {gate_db} dB, clarity {clarity}, rough {rough}, held over gaps < {hold} s".format(**an.singing.to_dict()))
     o = notes.Opts(min_note=a.min_note, rest=a.rest)
     try:
-        pl = pipeline.place_notes(lyr, an, a.align, device, o, a.align_model, progress, style=a.style)
+        from .rap import Opts as RapOpts
+
+        ro = RapOpts.from_dict({"rest": a.rest, "window": None if a.rap_window is None else a.rap_window / 1000,
+                                "min_rise": a.rap_rise, "nucleus": a.rap_nucleus}) if rap else None
+        pl = pipeline.place_notes(lyr, an, a.align, device, o, a.align_model, progress, style=a.style, rap_opts=ro)
         ns = pl.notes
         if pl.doubtful:
             pipeline.warn(f"{len(pl.doubtful)} syllables found no singing to sit on (check them): "
