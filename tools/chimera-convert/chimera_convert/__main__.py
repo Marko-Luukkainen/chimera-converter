@@ -27,9 +27,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--style", choices=["sing", "rap", "speech"], default="sing",
                     help="sing: notes first, syllables on them (default); rap: words first, one note per syllable "
                          "at the pitch inside it (fast flows, speech-like pitch)")
-    ap.add_argument("--separator", choices=["htdemucs", "htdemucs_ft", "roformer"], default="htdemucs",
+    ap.add_argument("--separator", choices=["htdemucs", "htdemucs_ft", "roformer"], default=None,
                     help="with --separate: htdemucs (default), htdemucs_ft (cleaner, ~4x slower) or roformer "
-                         "(cleanest; scripts\\install_separator.bat)")
+                         "(cleanest; scripts\\install_separator.bat; the default for speech when installed: "
+                         "Demucs leaves an organ or pads in the voice)")
     ap.add_argument("--lead-only", action="store_true",
                     help="with --separate: keep the lead voice alone, without backing vocals, doubles and ad-libs "
                          "(RoFormer karaoke; scripts\\install_separator.bat)")
@@ -61,6 +62,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="speech: the intonation at the voice's own range (default) or at the speaker's pitch")
     ap.add_argument("--expression", type=float, default=1.0, help="speech: pitch intervals scaled (0.5 flatter, 1.5 livelier; default 1)")
     ap.add_argument("--dynamics", type=float, default=1.0, help="speech: loudness differences scaled (0 even, 1 as spoken)")
+    ap.add_argument("--remove-held-tones", action=argparse.BooleanOptionalAction, default=None,
+                    help="speech: take tones held for seconds (an organ, pads left by the separator) out of the voice "
+                         "before tracking it (default: on for speech, off otherwise)")
     ap.add_argument("--voice", choices=["male", "female", "child", "neanderthal"], default=None,
                     help="the voice (default: from the recording's pitch)")
     ap.add_argument("--plot", action="store_true", help="also write a PNG of the pitch, notes and syllables")
@@ -71,6 +75,10 @@ def main(argv: list[str] | None = None) -> int:
         a.keep_cents = rap
     if a.vibrato is None:
         a.vibrato = 0.0 if rap else 35.0
+    if a.separator is None:
+        import importlib.util
+
+        a.separator = "roformer" if spoken and a.separate and importlib.util.find_spec("audio_separator") else "htdemucs"
     if a.rest is None:
         a.rest = 0.15 if rap else 0.25
     if (rap or spoken) and a.align != "mms":
@@ -108,7 +116,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{stage} ...")
 
     an = pipeline.analyze_audio(a.audio, a.separate, device, a.pitch, out.with_suffix(".vocals.wav"), progress,
-                                voice_only=a.separate or a.voice_only, separator=a.separator, lead_only=a.lead_only)
+                                voice_only=a.separate or a.voice_only, separator=a.separator, lead_only=a.lead_only,
+                                remove_held=spoken if a.remove_held_tones is None else a.remove_held_tones)
     for w in an.warnings:
         pipeline.warn(w)
     sug = an.singing
@@ -127,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
         pl = pipeline.place_notes(lyr, an, a.align, device, o, a.align_model, progress, style=a.style, rap_opts=ro)
         ns = pl.notes
         if pl.doubtful:
-            pipeline.warn(f"{len(pl.doubtful)} syllables found no singing to sit on (check them): "
+            pipeline.warn(f"{len(pl.doubtful)} syllables found no {'voice' if spoken else 'singing'} to sit on (check them): "
                           + " ".join(lyr.syl_text[k] for k in pl.doubtful[:20]) + (" …" if len(pl.doubtful) > 20 else ""))
         if spoken:
             from . import speech

@@ -319,8 +319,14 @@ def test_speech_is_said_by_chimeras_speech_planner_and_follows_edits(client, tmp
     """Speech: the speech file (timing, pitch and level contours) instead of notes; Chimera's
     `render spoken`; an edit moves a syllable's contour with it; live and duet are melody-only."""
     monkeypatch.setattr("chimera_convert.align.emissions", fake_emissions)
+    import chimera_convert.pipeline as pl
+
+    held = []
+    real = pl.analyze_audio
+    monkeypatch.setattr(pl, "analyze_audio", lambda *a, **k: held.append(k.get("remove_held")) or real(*a, **k))
     info = client.get("/api/info").json()
-    assert set(info["speech_defaults"]) == {"rest", "window", "min_rise", "nucleus", "expression", "dynamics", "pitch"}
+    assert set(info["speech_defaults"]) == {"rest", "window", "min_rise", "nucleus", "expression", "dynamics", "pitch", "held"}
+    assert info["speech_defaults"]["held"] is True
     wav = tmp_path / "puhe.wav"
     sf.write(wav, voice(), SR)
     with open(wav, "rb") as f:
@@ -335,6 +341,7 @@ def test_speech_is_said_by_chimeras_speech_planner_and_follows_edits(client, tmp
     assert m["kind"] == "spoken" and len(m["syllables"]) == len(s["syllables"]) == 7
     assert s["options"]["speech"]["pitch"] == "speaker" and s["options"]["speech"]["expression"] == 1.5
     assert (client.sessions / sid / "speech.npz").exists()
+    assert held == [True]  # the held tones (an organ) taken out of the voice first
     # an edit: the third syllable a semitone up -> its stretch of the pitch contour moves up
     ns = s["notes"]
     k = next(i for i, n in enumerate(ns) if n["syl"] == 2)
@@ -353,7 +360,12 @@ def test_speech_is_said_by_chimeras_speech_planner_and_follows_edits(client, tmp
     assert "render spoken" in (client.sessions / sid / "render.args").read_text()
     assert client.post(f"/api/sessions/{sid}/live").status_code == 409
     assert client.post(f"/api/sessions/{sid}/show", json={"show_id": "puhe"}).status_code == 409
-    # and back to singing from the same analysis
+    # back to singing: singing keeps its held notes, so the kept voice is analysed again (no stop
+    # for the review), and speech with the held tones kept is the same analysis
     assert client.post(f"/api/sessions/{sid}/style", json={"style": "sing"}).status_code == 200
     s = wait_done(client, sid)
     assert s["status"] == "done" and "kind" not in s["melody"], s.get("error")
+    assert held == [True, False]
+    assert client.post(f"/api/sessions/{sid}/style", json={"style": "speech", "speech": {"held": False}}).status_code == 200
+    s = wait_done(client, sid)
+    assert s["status"] == "done" and s["melody"]["kind"] == "spoken" and held == [True, False], s.get("error")

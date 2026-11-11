@@ -114,3 +114,34 @@ def test_the_speech_file_is_written_and_read_back(tmp_path):
     d = speech.build(ns, ns, lyr, c, speech.Opts(), "male").data
     chimera.write_json(tmp_path / "s.json", d)
     assert json.loads((tmp_path / "s.json").read_text(encoding="utf-8")) == d
+
+
+def test_held_tones_are_taken_out_and_speech_kept():
+    """An organ the separator left in a sermon's vocal stem was tracked as the priest's pitch
+    (syllables an octave up, flat) and held syllables over the pauses."""
+    from chimera_convert import audio
+
+    sr = 16000
+    t = np.arange(int(6.0 * sr)) / sr
+    organ = 0.3 * np.sin(2 * np.pi * 392.0 * t)  # one note held for 6 s
+    speech_ = np.zeros_like(t)
+    rng = np.random.default_rng(1)
+    for k in range(12):  # syllables of 0.25 s gliding down from ~220 Hz, 0.2 s apart
+        a = 0.3 + k * 0.45
+        m = (t >= a) & (t < a + 0.25)
+        f0 = 220 * 2 ** (-(t[m] - a) * 8 / 12 / 0.25) * 2 ** (rng.uniform(-2, 2) / 12)
+        ph = 2 * np.pi * np.cumsum(f0) / sr
+        speech_[m] = sum(0.2 / h * np.sin(h * ph) for h in range(1, 6)) * np.hanning(m.sum())
+    y = audio.remove_held_tones((organ + speech_).astype(np.float32), sr)
+    assert len(y) == len(t)
+
+    def band(x, lo, hi, mask):
+        X = np.abs(np.fft.rfft(x[mask] * np.hanning(mask.sum())))
+        f = np.fft.rfftfreq(mask.sum(), 1 / sr)
+        return 10 * np.log10(np.sum(X[(f > lo) & (f < hi)] ** 2) + 1e-12)
+
+    pause = (t > 0.6) & (t < 0.7)  # between syllables: the organ alone
+    assert band(organ + speech_, 380, 405, pause) - band(y, 380, 405, pause) > 15
+    syl = (t > 0.3 + 4 * 0.45 + 0.05) & (t < 0.3 + 4 * 0.45 + 0.2)
+    before, after = band(speech_, 120, 260, syl), band(y, 120, 260, syl)
+    assert abs(after - before) < 3  # the speech's fundamental kept

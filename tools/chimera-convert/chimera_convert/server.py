@@ -116,6 +116,11 @@ def speech_settings(opt: dict):
     return Opts.from_dict(opt.get("speech"))
 
 
+def removes_held(opt: dict) -> bool:
+    """Whether this session's analysis takes the held tones out of the voice (speech, unless turned off)."""
+    return opt.get("style", "sing") == "speech" and speech_settings(opt).held
+
+
 def rest_of(opt: dict) -> float:
     style = opt.get("style", "sing")
     return rap_settings(opt).rest if style == "rap" else speech_settings(opt).rest if style == "speech" else 0.25
@@ -163,7 +168,7 @@ def notes_from(s: dict) -> list[notes.Note]:
 # ----------------------------------------------------------------------------- the worker
 
 STAGES = {"loading": (0.02, "Loading the audio"), "separating the voice": (0.05, "Separating the voice"),
-          "pitch": (0.45, "Tracking the pitch"), "aligning the lyrics": (0.65, "Aligning the lyrics"),
+          "removing held tones": (0.4, "Removing held tones"), "pitch": (0.45, "Tracking the pitch"), "aligning the lyrics": (0.65, "Aligning the lyrics"),
           "notes": (0.9, "Making the notes")}
 
 
@@ -222,10 +227,12 @@ class Worker:
         if s.get("phase", "analyze") == "analyze" or not cache.exists():
             if opt["separate"] and not vocals.exists():
                 an = pipeline.analyze_audio(d / s["files"]["original"], True, self.device, None, vocals, progress,
-                                            separator=opt.get("separator", "htdemucs"), lead_only=bool(opt.get("lead_only")))
+                                            separator=opt.get("separator", "htdemucs"), lead_only=bool(opt.get("lead_only")),
+                                            remove_held=removes_held(opt))
             else:
                 src = vocals if vocals.exists() else d / s["files"]["original"]
-                an = pipeline.analyze_audio(src, False, self.device, None, None, progress, voice_only=vocals.exists())
+                an = pipeline.analyze_audio(src, False, self.device, None, None, progress, voice_only=vocals.exists(),
+                                            remove_held=removes_held(opt))
             if opt.get("align", "mms") == "mms":
                 from . import align
 
@@ -239,8 +246,9 @@ class Worker:
                 s["analysis_warnings"] = an.warnings
             if vocals.exists():
                 s["files"]["vocals"] = "vocals.wav"
+            quiet = bool(s.pop("analyse_quietly", False))
             self.store.save(s)
-            if opt.get("review", True):
+            if opt.get("review", True) and not quiet:
                 self.store.update(sid, status="review", stage="Check what counts as singing", progress=1.0)
                 return
         else:
@@ -429,6 +437,7 @@ class SpeechIn(BaseModel):
     pitch: str = "voice"
     expression: float | None = None
     dynamics: float | None = None
+    held: bool | None = None
 
 
 class StyleIn(BaseModel):
@@ -578,7 +587,11 @@ def create_app(repo: Path | None = None, sessions: Path = SESSIONS, start_worker
             opt["rap"] = clean_rap(body.rap)
         if body.speech is not None:
             opt["speech"] = clean_speech(body.speech)
-        s = store.update(sid, options=opt, status="queued", stage="Queued", progress=0.0, render=None, phase="notes")
+        # speech analyses the voice without its held tones, the other styles with them: a change
+        # between the two analyses the kept voice again (no separation; a minute, not seconds)
+        again = pipeline.analysed_held_removed(store.dir(sid) / ANALYSIS) != removes_held(opt)
+        s = store.update(sid, options=opt, status="queued", stage="Queued", progress=0.0, render=None,
+                         phase="analyze" if again else "notes", analyse_quietly=again)
         worker.submit(sid)
         return summary(s)
 

@@ -155,6 +155,8 @@ export function NewSong(props: { onCreated: (id: string) => void; info?: Info | 
               onClick={() => {
                 setStyle(k);
                 if (k !== "sing") setAlign("mms");
+                // speech over music: RoFormer leaves no organ or pads in the voice (Demucs does)
+                if (k === "speech" && props.info?.separators?.roformer) setSeparator("roformer");
               }}
             >
               {STYLE_NAMES[k]}

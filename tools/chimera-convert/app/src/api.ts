@@ -24,6 +24,8 @@ export interface SpeechSettings {
   expression: number;
   /** loudness differences scaled (1 = as spoken) */
   dynamics: number;
+  /** take the held tones (an organ, pads) out of the voice before the analysis */
+  held: boolean;
 }
 
 export interface Detection {

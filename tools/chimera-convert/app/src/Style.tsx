@@ -4,7 +4,7 @@ import { api, type Info, type RapSettings, type Session, type SpeechSettings, ty
 /** the server's defaults (rap.Opts), used until /api/info has answered */
 export const RAP_DEFAULTS: RapSettings = { rest: 0.15, window: 0.08, min_rise: 4, nucleus: 0.7, keep_cents: true };
 
-export const SPEECH_DEFAULTS: SpeechSettings = { rest: 0.25, window: 0.08, min_rise: 4, nucleus: 0.7, pitch: "voice", expression: 1, dynamics: 1 };
+export const SPEECH_DEFAULTS: SpeechSettings = { rest: 0.25, window: 0.08, min_rise: 4, nucleus: 0.7, pitch: "voice", expression: 1, dynamics: 1, held: true };
 
 export const STYLE_NAMES: Record<Style, string> = { sing: "Singing", rap: "Rap", speech: "Speech" };
 
@@ -20,7 +20,7 @@ export const STYLE_HELP: Record<Style, string> = {
  * stresses are, and what makes a pause; the timing settings are the rap style's. */
 export function SpeechSettingsFields({ value, onChange, defaults }: { value: SpeechSettings; onChange: (v: SpeechSettings) => void; defaults?: SpeechSettings }) {
   const d = defaults ?? SPEECH_DEFAULTS;
-  const set = (k: keyof SpeechSettings, v: number | string) => onChange({ ...value, [k]: v });
+  const set = (k: keyof SpeechSettings, v: number | string | boolean) => onChange({ ...value, [k]: v });
   const changed = (Object.keys(d) as (keyof SpeechSettings)[]).some((k) => value[k] !== d[k]);
   return (
     <div className="rap-settings">
@@ -59,6 +59,13 @@ export function SpeechSettingsFields({ value, onChange, defaults }: { value: Spe
         <span>A vowel starts at a rise of</span>
         <input type="number" min={1} max={15} step={0.5} value={value.min_rise} onChange={(e) => set("min_rise", Number(e.target.value) || d.min_rise)} />
         <i>dB / 20 ms</i>
+      </label>
+      <label
+        className="check"
+        title="A separator leaves an organ, pads or a drone in the voice; their held notes read as the speaker's pitch and hold syllables over the pauses. Speech never holds a tone for two seconds, so whatever does is taken out before the analysis."
+      >
+        <input type="checkbox" checked={value.held} onChange={(e) => set("held", e.target.checked)} />
+        Remove held tones left in the voice (organ, pads)
       </label>
       {changed && (
         <button type="button" className="link" onClick={() => onChange({ ...d })}>
@@ -170,6 +177,9 @@ export function StyleChip({ s, info, onQueued }: { s: Session; info: Info | null
   const [err, setErr] = useState<string | null>(null);
   const busy = s.status === "queued" || s.status === "running";
   const noAlign = s.options.align !== "mms";
+  // speech analyses the voice without its held tones, the other styles with them (server.removes_held)
+  const held = (st: Style, sp?: SpeechSettings) => st === "speech" && (sp?.held ?? true);
+  const reanalyse = held(want, speech) !== held(style, s.options.speech);
   const apply = async () => {
     if (!confirm(`Convert it again as ${STYLE_NAMES[want].toLowerCase()}? Your edits to the notes are lost.`)) return;
     setErr(null);
@@ -229,7 +239,12 @@ export function StyleChip({ s, info, onQueued }: { s: Session; info: Info | null
             <button className="primary" onClick={apply}>
               Convert again
             </button>
-            <span className="dim">Uses the analysis already made: takes seconds. Your edits to the notes are lost.</span>
+            <span className="dim">
+              {reanalyse
+                ? "Analyses the kept voice again (held tones are taken out for speech only): about a minute."
+                : "Uses the analysis already made: takes seconds."}{" "}
+              Your edits to the notes are lost.
+            </span>
           </div>
         </div>
       )}

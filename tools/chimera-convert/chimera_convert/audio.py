@@ -198,6 +198,33 @@ def _lead(vocals: np.ndarray, sr: int, log) -> tuple[np.ndarray, int]:
         return _roformer(src, ROFORMER_LEAD, log)
 
 
+HELD = 2.0
+"""a tone holding its spectrum this long (s) is not speech (remove_held_tones)"""
+
+
+def remove_held_tones(y: np.ndarray, sr: int, hold: float = HELD, margin: float = 1.5) -> np.ndarray:
+    """A speaking voice without the held tones a separator leaves in it (an organ, pads, a drone).
+
+    Demucs keeps a church organ in the vocal stem; its notes held for seconds are clear pitches
+    the tracker reads as the speaker's (a sermon's syllables came out an octave up, flat), and they
+    hold syllables on over the pauses. Speech never holds a tone that long, so the stem's
+    spectrum's median over `hold` s, bin by bin, is the held tones; a time-frequency mask keeps
+    only what rises above them (`margin` times their level). A vowel held up to about half of
+    `hold` keeps its harmonics; singing would lose its held notes, so this is for speech only."""
+    import librosa
+    from scipy.ndimage import median_filter
+
+    n_fft, hop, step = 2048 * sr // 16000, 160 * sr // 16000, 4
+    X = librosa.stft(y, n_fft=n_fft, hop_length=hop)
+    S = np.abs(X)
+    # the median over coarser frames (every `step`th): the same held tones, 4x faster
+    width = max(3, int(round(hold * sr / hop / step)) | 1)
+    held = median_filter(S[:, ::step], size=(1, width), mode="nearest")
+    held = np.repeat(held, step, axis=1)[:, : S.shape[1]]
+    mask = np.clip(1.0 - (margin * held / (S + 1e-9)) ** 2, 0.0, 1.0)
+    return librosa.istft(X * mask, hop_length=hop, length=len(y)).astype(np.float32)
+
+
 def pitch(y16: np.ndarray, method: str, device: str, fmin: float = 60.0, fmax: float = 1000.0, gate_db: float = -40.0):
     """Sung pitch every 10 ms as MIDI note numbers (NaN where unvoiced). Returns (times, midi)."""
     import librosa

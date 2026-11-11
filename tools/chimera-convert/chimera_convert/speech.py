@@ -59,12 +59,14 @@ class Opts:
     """pitch intervals scaled (0.5 flatter, 1.5 livelier)"""
     dynamics: float = 1.0
     """loudness differences scaled (0 even, 1 as spoken)"""
+    held: bool = True
+    """take the held tones (an organ, pads) out of the voice before the analysis (audio.remove_held_tones)"""
 
     LIMITS = {"rest": (0.05, 1.5), "window": (0.0, 0.2), "min_rise": (1.0, 15.0), "nucleus": (0.2, 1.0),
               "expression": (0.0, 2.0), "dynamics": (0.0, 2.0)}
 
     def to_dict(self) -> dict:
-        return {**{k: round(float(getattr(self, k)), 3) for k in self.LIMITS}, "pitch": self.pitch}
+        return {**{k: round(float(getattr(self, k)), 3) for k in self.LIMITS}, "pitch": self.pitch, "held": self.held}
 
     @staticmethod
     def from_dict(d: dict | None) -> "Opts":
@@ -74,6 +76,8 @@ class Opts:
                 setattr(o, k, float(np.clip(float(d[k]), lo, hi)))
         if d and d.get("pitch") in PITCHES:
             o.pitch = d["pitch"]
+        if d and d.get("held") is not None:
+            o.held = bool(d["held"])
         return o
 
     def rap(self):

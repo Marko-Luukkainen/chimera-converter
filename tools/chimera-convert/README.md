@@ -94,6 +94,17 @@ error of 0.2 semitones (90-99 % of frames within one), and three syllables spoke
 louder came back 6.2 dB louder (syllable levels correlated 0.92). Without the level contour the
 same syllables came out 1.8 dB quieter: the stresses would be lost.
 
+**Speech over music** (a sermon over a church organ, 3.5 min): Demucs leaves the organ in the
+voice, and its notes held for seconds read as the speaker's pitch (syllables an octave up, flat)
+and hold syllables over the pauses. So for speech the converter takes out of the voice every
+tone held for about two seconds (speech never holds one that long; Remove held tones in the app,
+`--no-remove-held-tones` to keep them), and uses RoFormer when it is installed. Against the
+priest's pitch tracked on RoFormer's clean voice, per syllable: Demucs correlated 0.82, Demucs
+with the held tones out 0.84 (and 22 silences inside words down to 10), RoFormer 0.94, RoFormer
+with the held tones out 0.97 (one syllable off by more than 5 semitones). RoFormer took 17.5
+minutes on a Quadro T2000, Demucs 1.5. A silence inside a word (a slow "kaik- ... -ki") is a held
+consonant in Chimera, never a breath.
+
 **Language** is read from the lyrics (Finnish or English). When the words don't tell (too few,
 both languages, or they look like another language such as Swedish), the converter asks: the app
 shows a language choice, and the command line stops and asks for `--lang fi` or `--lang en`. You
@@ -249,9 +260,10 @@ Then in Chimera (at the repo root):
 | `--lang auto\|fi\|en` | `auto` | the lyrics' language; `auto` reads it from the words and stops to ask when unsure |
 | `--style sing\|rap\|speech` | `sing` | `rap`: words first, one note per syllable at the pitch inside it (see Rap); `speech`: a speech file for `chimera render spoken` (see Speech) |
 | `--speech-pitch voice\|speaker`, `--expression X`, `--dynamics X` | `voice`, 1, 1 | speech: the intonation at the voice's range or the speaker's pitch; its rises and falls and the stresses scaled |
+| `--remove-held-tones`, `--no-remove-held-tones` | on for speech | take tones held for seconds (an organ, pads the separator left) out of the voice before tracking it |
 | `--voice male\|female\|child\|neanderthal` | from the pitch | the voice the file is made for |
 | `--separate` | off | separate the voice from the backing first |
-| `--separator htdemucs\|htdemucs_ft\|roformer` | `htdemucs` | with `--separate`: `htdemucs_ft` is cleaner and about 4x slower; `roformer` the cleanest (scripts\install_separator.bat) |
+| `--separator htdemucs\|htdemucs_ft\|roformer` | `htdemucs` (speech: `roformer` when installed) | with `--separate`: `htdemucs_ft` is cleaner and about 4x slower; `roformer` the cleanest (scripts\install_separator.bat) |
 | `--lead-only` | off | with `--separate`: the lead voice alone, without backing vocals, doubles and ad-libs (scripts\install_separator.bat); warns where it drops a hook sung by other voices |
 | `--voice-only` | off | the recording is a voice alone (implied by `--separate`) |
 | `--gate DB`, `--clarity X`, `--rough X`, `--hold S` | suggested | what counts as singing (see the app's step 2) |
