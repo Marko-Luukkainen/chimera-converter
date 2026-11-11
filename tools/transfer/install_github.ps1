@@ -4,7 +4,8 @@
 #  1. the tools, with winget: Python 3.12, Bun, Rust and the Visual Studio C++ build tools
 #     (the engine is built from source, so Rust is needed)
 #  2. Chimera's JavaScript packages, the engine (chimera.wasm) and the CLI (chimera.exe)
-#  3. the converter app and its Python environment (torch with CUDA on an NVIDIA GPU)
+#  3. the converter app and its Python environment (torch with CUDA on an NVIDIA GPU, and the
+#     RoFormer separator built for that torch)
 #  4. desktop shortcuts and a check
 # Run again to update: what is installed is skipped, the builds are redone.
 # Log: <repo>\install.log
@@ -94,6 +95,12 @@ Check "chimera.exe (Sing with Chimera in the converter)" (Test-Path (Join-Path $
 Check "Chimera packages" (Test-Path (Join-Path $Repo "node_modules\vite")) "run 'bun install' in $Repo"
 Check "converter app" (Test-Path (Join-Path $conv "app\dist\index.html")) "run 'bun install' and 'bun run build' in $conv\app"
 Check "converter Python" (Test-Path (Join-Path $conv ".venv\Scripts\python.exe")) "see $conv\out\install.log"
+$cpy = Join-Path $conv ".venv\Scripts\python.exe"
+if (Test-Path $cpy) {
+  & $cpy -c "import audio_separator, audioread" 2>$null
+  if ($LASTEXITCODE -eq 0) { Write-Host "   OK       RoFormer separator (optional)" -ForegroundColor Green }
+  else { Write-Host "   SKIPPED  RoFormer separator (optional; Demucs works): see $conv\out\install_separator.log" -ForegroundColor Yellow }
+}
 $gpu = $false
 if (Have "nvidia-smi") { & nvidia-smi -L 2>$null | Out-Null; $gpu = ($LASTEXITCODE -eq 0) }
 Write-Host ("   GPU: " + $(if ($gpu) { "NVIDIA found (fast conversion)" } else { "no NVIDIA GPU: the converter works, but slower" }))

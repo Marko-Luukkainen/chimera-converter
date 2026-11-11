@@ -29,10 +29,10 @@ def main(argv: list[str] | None = None) -> int:
                          "at the pitch inside it (fast flows, speech-like pitch)")
     ap.add_argument("--separator", choices=["htdemucs", "htdemucs_ft", "roformer"], default="htdemucs",
                     help="with --separate: htdemucs (default), htdemucs_ft (cleaner, ~4x slower) or roformer "
-                         "(cleanest; pip install -r requirements-separator.txt)")
+                         "(cleanest; scripts\\install_separator.bat)")
     ap.add_argument("--lead-only", action="store_true",
                     help="with --separate: keep the lead voice alone, without backing vocals, doubles and ad-libs "
-                         "(RoFormer karaoke; requirements-separator.txt)")
+                         "(RoFormer karaoke; scripts\\install_separator.bat)")
     ap.add_argument("--align", choices=["mms", "none"], default="mms",
                     help="mms: forced alignment of the lyrics (default); none: syllables to notes in order")
     ap.add_argument("--align-model", default=None, help="Hugging Face CTC model for the alignment")

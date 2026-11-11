@@ -84,11 +84,11 @@ export function SeparationFields({
           <option value="htdemucs">Demucs (fast, about a minute)</option>
           <option value="htdemucs_ft">Demucs fine-tuned (cleaner, about twice as slow)</option>
           <option value="roformer" disabled={!roformer}>
-            RoFormer (cleanest, about 10 minutes){roformer ? "" : " — install requirements-separator.txt"}
+            RoFormer (cleanest, about 10 minutes){roformer ? "" : " — run scripts\\install_separator.bat"}
           </option>
         </select>
       </label>
-      <label className="check" title={roformer ? "" : "Needs requirements-separator.txt"}>
+      <label className="check" title={roformer ? "" : "Needs scripts\\install_separator.bat"}>
         <input type="checkbox" checked={leadOnly} disabled={!roformer} onChange={(e) => onLeadOnly(e.target.checked)} />
         Lead voice only (drops backing vocals, doubles and ad-libs; can drop a hook sung by other voices — you are warned where)
       </label>

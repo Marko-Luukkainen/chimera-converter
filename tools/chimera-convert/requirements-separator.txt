@@ -1,10 +1,8 @@
 # Optional: the RoFormer separator (--separator roformer) and the lead voice (--lead-only).
-# Install after requirements.txt, with the same CUDA index as torch (README, Install). audio-separator
-# needs torchvision; from PyPI alone pip would replace the CUDA torch with a CPU build, so torchvision
-# comes from the CUDA index, built for the torch that is installed (torch 2.11 -> torchvision 0.26).
-#   pip install -r requirements-separator.txt --extra-index-url https://download.pytorch.org/whl/cu128
-torchvision==0.26.*
+# Installed by scripts\install.bat; on its own: scripts\install_separator.bat. Don't pip install this
+# file alone: audio-separator needs torchvision, and from PyPI pip takes a torch with it that
+# replaces the CUDA torch with a CPU one. install_separator.ps1 first installs the torchvision built
+# for the torch that is here, from PyTorch's own index, and checks that torch stays as it is.
 audio-separator[gpu]>=0.48
 # imported by audio-separator but not declared by it (librosa 1.0 no longer brings it)
 audioread
-# without an NVIDIA GPU: audio-separator[cpu]>=0.48 instead of [gpu], and the cpu index
